@@ -1,11 +1,11 @@
-# smesir: Hierarchical Modeling of Disease Transmission Rates
+# smesir: Hierarchically modeling disease transmission rates
 
 ## Getting Started
 
 Installation Instructions
 ```
 library(devtools)
-install_github("davidbuch/gretel")
+install_github("davidbuch/smesir")
 ```
 
 ## Example
