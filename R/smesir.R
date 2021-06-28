@@ -322,6 +322,8 @@ smesir <- function(formula, data, region_populations, outbreak_times,
                  mcmc_diagnostics = mcmc_diagnostics, 
                  samples = samples,
                  prior = prior,
+                 formula = formula,
+                 sr_style = sr_style,
                  design_matrices = design_matrices)
   return(output)
 }
