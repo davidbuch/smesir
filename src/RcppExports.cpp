@@ -46,8 +46,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // log_llh
-double log_llh(const NumericMatrix B, const NumericMatrix Y, const double gamma, const IntegerVector T_1, const NumericVector Initial_Impulse, const IntegerVector N, const NumericVector psi);
-RcppExport SEXP _smesir_log_llh(SEXP BSEXP, SEXP YSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP Initial_ImpulseSEXP, SEXP NSEXP, SEXP psiSEXP) {
+double log_llh(const NumericMatrix B, const NumericMatrix Y, const double gamma, const IntegerVector T_1, const NumericVector Initial_Impulse, const IntegerVector N, const NumericVector psi, const NumericMatrix frailty);
+RcppExport SEXP _smesir_log_llh(SEXP BSEXP, SEXP YSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP Initial_ImpulseSEXP, SEXP NSEXP, SEXP psiSEXP, SEXP frailtySEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -58,31 +58,14 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const NumericVector >::type Initial_Impulse(Initial_ImpulseSEXP);
     Rcpp::traits::input_parameter< const IntegerVector >::type N(NSEXP);
     Rcpp::traits::input_parameter< const NumericVector >::type psi(psiSEXP);
-    rcpp_result_gen = Rcpp::wrap(log_llh(B, Y, gamma, T_1, Initial_Impulse, N, psi));
-    return rcpp_result_gen;
-END_RCPP
-}
-// log_llh2
-double log_llh2(const NumericMatrix B, const NumericMatrix Y, const double gamma, const IntegerVector T_1, const NumericVector Initial_Impulse, const IntegerVector N, const NumericVector psi, const arma::mat C0i);
-RcppExport SEXP _smesir_log_llh2(SEXP BSEXP, SEXP YSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP Initial_ImpulseSEXP, SEXP NSEXP, SEXP psiSEXP, SEXP C0iSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const NumericMatrix >::type B(BSEXP);
-    Rcpp::traits::input_parameter< const NumericMatrix >::type Y(YSEXP);
-    Rcpp::traits::input_parameter< const double >::type gamma(gammaSEXP);
-    Rcpp::traits::input_parameter< const IntegerVector >::type T_1(T_1SEXP);
-    Rcpp::traits::input_parameter< const NumericVector >::type Initial_Impulse(Initial_ImpulseSEXP);
-    Rcpp::traits::input_parameter< const IntegerVector >::type N(NSEXP);
-    Rcpp::traits::input_parameter< const NumericVector >::type psi(psiSEXP);
-    Rcpp::traits::input_parameter< const arma::mat >::type C0i(C0iSEXP);
-    rcpp_result_gen = Rcpp::wrap(log_llh2(B, Y, gamma, T_1, Initial_Impulse, N, psi, C0i));
+    Rcpp::traits::input_parameter< const NumericMatrix >::type frailty(frailtySEXP);
+    rcpp_result_gen = Rcpp::wrap(log_llh(B, Y, gamma, T_1, Initial_Impulse, N, psi, frailty));
     return rcpp_result_gen;
 END_RCPP
 }
 // smesir_mcmc
-List smesir_mcmc(const NumericMatrix Y, const List Design_Matrices, const arma::vec& lambda, const arma::vec& V0param, const NumericMatrix IGSR, const double gamma, const IntegerVector T_1, const NumericVector Initial_Impulse, const IntegerVector N, const NumericVector psi, const double tempering_ratio, const int ncycles, const int samps_per_cycle, const int nchain, const int iter, const int warmup, const int thin, const bool sr_style, const bool quiet);
-RcppExport SEXP _smesir_smesir_mcmc(SEXP YSEXP, SEXP Design_MatricesSEXP, SEXP lambdaSEXP, SEXP V0paramSEXP, SEXP IGSRSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP Initial_ImpulseSEXP, SEXP NSEXP, SEXP psiSEXP, SEXP tempering_ratioSEXP, SEXP ncyclesSEXP, SEXP samps_per_cycleSEXP, SEXP nchainSEXP, SEXP iterSEXP, SEXP warmupSEXP, SEXP thinSEXP, SEXP sr_styleSEXP, SEXP quietSEXP) {
+List smesir_mcmc(const NumericMatrix Y, const List Design_Matrices, const arma::vec& lambda, const arma::vec& V0param, const NumericMatrix IGSR, const double gamma, const IntegerVector T_1, const NumericVector Initial_Impulse, const double dispersion, const IntegerVector N, const NumericVector psi, const double tempering_ratio, const int ncycles, const int samps_per_cycle, const int nchain, const int iter, const int warmup, const int thin, const bool sr_style, const bool quiet);
+RcppExport SEXP _smesir_smesir_mcmc(SEXP YSEXP, SEXP Design_MatricesSEXP, SEXP lambdaSEXP, SEXP V0paramSEXP, SEXP IGSRSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP Initial_ImpulseSEXP, SEXP dispersionSEXP, SEXP NSEXP, SEXP psiSEXP, SEXP tempering_ratioSEXP, SEXP ncyclesSEXP, SEXP samps_per_cycleSEXP, SEXP nchainSEXP, SEXP iterSEXP, SEXP warmupSEXP, SEXP thinSEXP, SEXP sr_styleSEXP, SEXP quietSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -94,6 +77,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const double >::type gamma(gammaSEXP);
     Rcpp::traits::input_parameter< const IntegerVector >::type T_1(T_1SEXP);
     Rcpp::traits::input_parameter< const NumericVector >::type Initial_Impulse(Initial_ImpulseSEXP);
+    Rcpp::traits::input_parameter< const double >::type dispersion(dispersionSEXP);
     Rcpp::traits::input_parameter< const IntegerVector >::type N(NSEXP);
     Rcpp::traits::input_parameter< const NumericVector >::type psi(psiSEXP);
     Rcpp::traits::input_parameter< const double >::type tempering_ratio(tempering_ratioSEXP);
@@ -105,7 +89,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const int >::type thin(thinSEXP);
     Rcpp::traits::input_parameter< const bool >::type sr_style(sr_styleSEXP);
     Rcpp::traits::input_parameter< const bool >::type quiet(quietSEXP);
-    rcpp_result_gen = Rcpp::wrap(smesir_mcmc(Y, Design_Matrices, lambda, V0param, IGSR, gamma, T_1, Initial_Impulse, N, psi, tempering_ratio, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet));
+    rcpp_result_gen = Rcpp::wrap(smesir_mcmc(Y, Design_Matrices, lambda, V0param, IGSR, gamma, T_1, Initial_Impulse, dispersion, N, psi, tempering_ratio, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -114,9 +98,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_smesir_solve_infections", (DL_FUNC) &_smesir_solve_infections, 5},
     {"_smesir_solve_events", (DL_FUNC) &_smesir_solve_events, 2},
     {"_smesir_log_poisd", (DL_FUNC) &_smesir_log_poisd, 2},
-    {"_smesir_log_llh", (DL_FUNC) &_smesir_log_llh, 7},
-    {"_smesir_log_llh2", (DL_FUNC) &_smesir_log_llh2, 8},
-    {"_smesir_smesir_mcmc", (DL_FUNC) &_smesir_smesir_mcmc, 19},
+    {"_smesir_log_llh", (DL_FUNC) &_smesir_log_llh, 8},
+    {"_smesir_smesir_mcmc", (DL_FUNC) &_smesir_smesir_mcmc, 20},
     {NULL, NULL, 0}
 };
 

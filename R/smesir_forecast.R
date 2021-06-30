@@ -6,7 +6,7 @@
 #' @param model_fit A list returned from the \code{smesir} function
 #' @param new_x An optional list containing covariate data to be used in forecasting
 smesir_forecast <- function(Jf, model_fit, new_x = NULL, region_populations, outbreak_times, 
-                            mean_removal_time, incidence_probabilities, 
+                            mean_removal_time, incidence_probabilities, dispersion,
                             initial_impulses = 1/region_populations){
   # unpack the model_fit object
   prior <- model_fit[["prior"]]
@@ -130,10 +130,17 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, region_populations, out
   deaths_CI <- array(dim = c(J + Jf,2,K))
   for(k in 1:K){
     deaths_comp <- function(beta_samp){
-      rpois(length(beta_samp),solve_events(solve_infections(beta_samp,
+      if(dispersion > 0){
+      rnbinom(length(beta_samp),size = 1/dispersion, mu = solve_events(solve_infections(beta_samp,
                                                             1/mean_removal_time, outbreak_times[k],
                                                             initial_impulses[k], region_populations[k]),
                                            incidence_probabilities))
+      }else if(dispersion == 0){
+        rpois(length(beta_samp),solve_events(solve_infections(beta_samp,
+                                                              1/mean_removal_time, outbreak_times[k],
+                                                              initial_impulses[k], region_populations[k]),
+                                             incidence_probabilities))
+      }else{stop("Invalid dispersion parameter")}
     }
     #print(dim(apply(cbind(beta_samps[,,k],forecast_beta[,,k]),1,deaths_comp)))
     death_samps[,,k] <- apply(cbind(beta_samps[,,k],forecast_beta[,,k]),1,deaths_comp)

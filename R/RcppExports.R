@@ -13,15 +13,11 @@ log_poisd <- function(y, lambda) {
     .Call(`_smesir_log_poisd`, y, lambda)
 }
 
-log_llh <- function(B, Y, gamma, T_1, Initial_Impulse, N, psi) {
-    .Call(`_smesir_log_llh`, B, Y, gamma, T_1, Initial_Impulse, N, psi)
+log_llh <- function(B, Y, gamma, T_1, Initial_Impulse, N, psi, frailty) {
+    .Call(`_smesir_log_llh`, B, Y, gamma, T_1, Initial_Impulse, N, psi, frailty)
 }
 
-log_llh2 <- function(B, Y, gamma, T_1, Initial_Impulse, N, psi, C0i) {
-    .Call(`_smesir_log_llh2`, B, Y, gamma, T_1, Initial_Impulse, N, psi, C0i)
-}
-
-smesir_mcmc <- function(Y, Design_Matrices, lambda, V0param, IGSR, gamma, T_1, Initial_Impulse, N, psi, tempering_ratio, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet) {
-    .Call(`_smesir_smesir_mcmc`, Y, Design_Matrices, lambda, V0param, IGSR, gamma, T_1, Initial_Impulse, N, psi, tempering_ratio, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet)
+smesir_mcmc <- function(Y, Design_Matrices, lambda, V0param, IGSR, gamma, T_1, Initial_Impulse, dispersion, N, psi, tempering_ratio, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet) {
+    .Call(`_smesir_smesir_mcmc`, Y, Design_Matrices, lambda, V0param, IGSR, gamma, T_1, Initial_Impulse, dispersion, N, psi, tempering_ratio, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet)
 }
 

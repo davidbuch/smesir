@@ -79,46 +79,18 @@ double log_llh(const NumericMatrix B,
                const IntegerVector T_1, // outbreak indices 
                const NumericVector Initial_Impulse, // initial impulses of infection
                const IntegerVector N, // region populations
-               const NumericVector psi // interval event probability
+               const NumericVector psi, // interval event probability
+               const NumericMatrix frailty
 ){
   const int K = Y.ncol();//, J = Y.nrow();
   double llh = 0;
   for(int k = 0; k != K; ++k){
     llh += log_poisd(Y(_,k),
-                     solve_events(
+                     frailty(_,k)*solve_events(
                        solve_infections(B(_,k),gamma,T_1(k),Initial_Impulse(k),N(k)),
                        psi)
     );
-    //Rcout << "k = " << k << " : llh = " << llh << "\n";
   }
-  return llh;
-}
-
-//[[Rcpp::export]]
-double log_llh2(const NumericMatrix B, 
-               const NumericMatrix Y, 
-               const double gamma, // inverse infectious period
-               const IntegerVector T_1, // outbreak indices 
-               const NumericVector Initial_Impulse, // initial impulses of infection
-               const IntegerVector N, // region populations
-               const NumericVector psi, // interval event probability
-               const arma::mat C0i
-){
-  int K = Y.ncol(), J = Y.nrow();
-  double llh = 0;
-  for(int k = 0; k != K; ++k){
-    llh += log_poisd(Y(_,k),
-                     solve_events(
-                       solve_infections(B(_,k),gamma,T_1(k),Initial_Impulse(k),N(k)),
-                       psi)
-    );
-    //Rcout << "k = " << k << " : llh = " << llh << "\n";
-  }
-  arma::vec B2(J);
-  for(int j = 0; j != J; ++j){
-    B2(j) = B(j,0);
-  }
-  llh += -10*arma::as_scalar(arma::trans(B2)*C0i*B2);
   return llh;
 }
 
@@ -140,39 +112,17 @@ double log_prior(const arma::mat & Xi,   // PxK matrix of local parameters
   return( -0.5 * arma::as_scalar( arma::dot(((X*(X.t())).eval()).diag(), 1/V) ) );
 }
 
-double obj_func_rcpp(const arma::vec &Xi,
-                     const arma::vec &V0,
-                     const NumericMatrix &Y,
-                     const arma::mat design_matrix,
-                     const double gamma,
-                     const IntegerVector T_1,
-                     const NumericVector Initial_Impulse,
-                     const IntegerVector N,
-                     const NumericVector psi)
-{
-  const int J = Y.nrow(), K = 1, P = Xi.n_elem;
-  arma::mat Ximat(P,K); Ximat.col(0) = Xi;
-  arma::vec Xi0(P,arma::fill::zeros);
-  arma::mat B(J,K);
-
-  B.col(0) = design_matrix * Xi;
-
-  double res = 0;
-  res += log_llh(NumericMatrix(J,K,B.begin()), Y, gamma, T_1, Initial_Impulse, N, psi);
-  res += log_prior(Ximat,Xi0,V0,B);
-  return(-res);
-}
-
 double log_posterior(const arma::mat & Xi,      // PxK matrix of local parameters
                      const arma::vec & Xi0,     // P vector of global parameters
                      const arma::vec & V,       // P? vector of variances
-                     const NumericMatrix & Y,
+                     const NumericMatrix Y, // auto pass by reference, I believe
                      const List Design_Matrices,  // List of K design matrices
                      const double gamma, // inverse infectious period
                      const IntegerVector T_1, // outbreak indices 
                      const NumericVector Initial_Impulse, // initial impulses of infection
                      const IntegerVector N, // region populations
-                     const NumericVector psi // interval event probability
+                     const NumericVector psi, // interval event probability
+                     const NumericMatrix frailty
 )
 {
   const int J = Y.nrow(), K = Y.ncol(); //, P = Xi.n_rows;
@@ -182,11 +132,40 @@ double log_posterior(const arma::mat & Xi,      // PxK matrix of local parameter
     B.col(k) = dmat * Xi.col(k);
   }
   double res = 0;
-  res += log_llh(NumericMatrix(J,K,B.begin()), Y, gamma, T_1, Initial_Impulse, N, psi);
+  res += log_llh(NumericMatrix(J,K,B.begin()), Y, gamma, T_1, Initial_Impulse, N, psi, frailty);
   //Rcout << res << " log llh \n" ;
   res += log_prior(Xi,Xi0,V,B);
   //Rcout << res << " log llh + log prior \n";
   return(res);
+}
+
+void update_frailty(NumericMatrix frailty,
+                      const double dispersion,
+                      const NumericMatrix Y,
+                      const arma::mat & Xi,
+                      const List Design_Matrices,
+                      const double gamma,
+                      const IntegerVector T_1,
+                      const NumericVector Initial_Impulse,
+                      const IntegerVector N,
+                      const NumericVector psi)
+{
+  const int J = Y.nrow(), K = Y.ncol(); //, P = Xi.n_rows;
+  arma::mat B(J,K);
+  for(int k = 0; k != K; ++k){
+    arma::mat dmat = Design_Matrices[k];
+    B.col(k) = dmat * Xi.col(k);
+  }
+  NumericMatrix expected_events(J,K);
+  for(int k = 0; k != K; ++k){
+    expected_events(_,k) = solve_events(solve_infections(as<NumericVector>(wrap(B.col(k))),gamma,T_1(k),Initial_Impulse(k),N(k)),psi);
+  }
+  
+  for(int j = 0; j != J; ++j){
+    for(int k = 0; k != K; ++k){
+      frailty(j,k) = R::rgamma((Y(j,k) + 1/dispersion),1/(expected_events(j,k) + 1/dispersion));
+    }
+  }
 }
 
 void update_xi0(arma::mat const & Xi,
@@ -269,6 +248,7 @@ List smesir_mcmc(const NumericMatrix Y,
                  const double gamma, // inverse infectious period
                  const IntegerVector T_1, // outbreak indices 
                  const NumericVector Initial_Impulse, // initial impulses of infection
+                 const double dispersion, // dispersion == 0 implies poisson likelihood
                  const IntegerVector N, // region populations
                  const NumericVector psi, // interval event probability
                  const double tempering_ratio,
@@ -326,43 +306,14 @@ List smesir_mcmc(const NumericMatrix Y,
         Rcout << " " << k + 1;
       }
     }
-    /*
-    if(!quiet){
-      Rcout << "\n...done!\n";
-      Rcout << "Begin optimizing...\n\tOptim codes (0 indicates success):";
+
+    NumericMatrix frailty(J,K); // initialize from prior
+    for(int j = 0; j != J; ++j){
+      for(int k = 0; k != K; ++k){
+        frailty(j,k) = R::rgamma(1/dispersion,dispersion);
+      }
     }
-    // Extract R's optim function
-    Environment stats("package:stats"); 
-    Function optim = stats["optim"];
-    List control_optim;
-    control_optim["maxit"] = 10000;
-    for(int k = 0; k != K; ++k){
-      // Call the optim function from R in C++
-      arma::vec xi_init = Xi.col(k);
-      NumericMatrix Yk( J , 1 , Y(_,k).begin() );
-      List opt_results = optim(_["par"]    = xi_init,
-                                     // Make sure this function is not exported!
-                                     _["fn"]     = Rcpp::InternalFunction(&obj_func_rcpp),
-                                     _["method"] = "SANN",
-                                     _["control"] = control_optim,
-                                     // Pass in the other parameters as everything
-                                     // is scoped environmentally
-                                     _["V0"] = V0,
-                                     _["Y"] = Yk,
-                                     _["design_matrix"] = Design_Matrices[k],
-                                     _["gamma"] = gamma,
-                                     _["T_1"] = T_1(k),
-                                     _["Initial_Impulse"] = Initial_Impulse(k),
-                                     _["N"] = N(k),
-                                     _["psi"] = psi
-                                    );
-      
-      Rcout << " " << as<IntegerVector>(opt_results[3]);
-      
-      // Extract out the estimated parameter values
-      Xi.col(k) = as<arma::vec>(opt_results[0]);
-    }
-    */
+    
     if(!quiet){
       Rcout << "\n...done!\n";
       Rcout << "Initializing global coefficients and variance parameters...";
@@ -423,8 +374,8 @@ List smesir_mcmc(const NumericMatrix Y,
         if(xi_samp_counts[k] < samps_per_cycle){
           Xik = Xi.col(k);
           Xi_prop.col(k) = Xik + arma::trans(R.slice(k)) * arma::randn(P);
-          double log_acc_prob = log_posterior(Xi_prop,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi) - 
-            log_posterior(Xi,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi);
+          double log_acc_prob = log_posterior(Xi_prop,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi,frailty) - 
+            log_posterior(Xi,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi,frailty);
           if(arma::as_scalar(arma::randu(1)) < std::exp(log_acc_prob)){
             Xi.col(k) = Xi_prop.col(k);
             ap_Xi(xi_samp_counts[k],0,k,arma::size(1,P,1)) = Xi_prop.col(k);
@@ -459,6 +410,8 @@ List smesir_mcmc(const NumericMatrix Y,
 
       update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
+
+      update_frailty(frailty,dispersion,Y,Xi,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi);
 
       cycle_complete = true;
       for(int k = 0; k!=K; ++k){
@@ -548,14 +501,16 @@ List smesir_mcmc(const NumericMatrix Y,
       for(int k = 0; k != K; ++k){
         Xik = Xi.col(k);
         Xi_prop.col(k) = Xik + arma::trans(R.slice(k)) * arma::randn(P);
-        double log_acc_prob = log_posterior(Xi_prop,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi) - 
-          log_posterior(Xi,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi);
+        double log_acc_prob = log_posterior(Xi_prop,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi,frailty) - 
+          log_posterior(Xi,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi,frailty);
         if(arma::as_scalar(arma::randu(1)) < std::exp(log_acc_prob)){
           Xi.col(k) = Xi_prop.col(k);
         }else{
           Xi_prop.col(k) = Xi.col(k);
         }
       }
+      
+      update_frailty(frailty,dispersion,Y,Xi,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi);
       
       // global params with gibbs proposals
       if(!sr_style){
@@ -586,28 +541,28 @@ List smesir_mcmc(const NumericMatrix Y,
 // this R code will be automatically run after the compilation.
 
 /*** R
-# Simulate Data
-J <- 50; K <- 5
-T_1 <- c(5,1,3,3,1) # first case reported at the end of interval t_1.
-N <- c(1e5,1e6,5e5,1e4,5e5)
-Initial_Impulse <- 10/N
-P <- 2
-twomat <- function(d,e){ h <- c(rep(0,d),rep(1,e - d)); return(matrix(c(rep(1,e),h),ncol = 2))}
-Design_Matrices <- list(twomat(8,J),twomat(3,J),twomat(5,J),twomat(10,J),twomat(3,J))
-Xi0 <- c(3,-1.5)
-Xi <- matrix(rnorm(P*K,rep(Xi0,K),sd = 0.2), ncol  = K)
-gamma <- 2/3
-psi <- 0.01*c(0.25,0.5,0.25)
-lambda <- 1
-V0 <- c(10,10,1) # sigma^2_0 should be small
-IGSR <- matrix(rep(2,6),nrow = 3, ncol = 2)
-Y <- matrix(nrow = J, ncol = K)
-for(k in 1:K){
-  Y[,k] <- rpois(J,solve_events(solve_infections(Design_Matrices[[k]]%*%Xi[,k],
-                                                 gamma, T_1[k],
-                                                 Initial_Impulse[k], N[k]),psi))
-
-}
+# # Simulate Data
+# J <- 50; K <- 5
+# T_1 <- c(5,1,3,3,1) # first case reported at the end of interval t_1.
+# N <- c(1e5,1e6,5e5,1e4,5e5)
+# Initial_Impulse <- 10/N
+# P <- 2
+# twomat <- function(d,e){ h <- c(rep(0,d),rep(1,e - d)); return(matrix(c(rep(1,e),h),ncol = 2))}
+# Design_Matrices <- list(twomat(8,J),twomat(3,J),twomat(5,J),twomat(10,J),twomat(3,J))
+# Xi0 <- c(3,-1.5)
+# Xi <- matrix(rnorm(P*K,rep(Xi0,K),sd = 0.2), ncol  = K)
+# gamma <- 2/3
+# psi <- 0.01*c(0.25,0.5,0.25)
+# lambda <- 1
+# V0 <- c(10,10,1) # sigma^2_0 should be small
+# IGSR <- matrix(rep(2,6),nrow = 3, ncol = 2)
+# Y <- matrix(nrow = J, ncol = K)
+# for(k in 1:K){
+#   Y[,k] <- rpois(J,solve_events(solve_infections(Design_Matrices[[k]]%*%Xi[,k],
+#                                                  gamma, T_1[k],
+#                                                  Initial_Impulse[k], N[k]),psi))
+# 
+# }
 # 
 # matplot(Y, type = "l", xlab = "day", ylab = NA, main = "Simulated Deaths")
 # 

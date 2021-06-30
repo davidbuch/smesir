@@ -18,13 +18,13 @@
 #' @param prior A length 2 named list containing \code{V0}, 3 variance hyperparameters for gaussian priors,
 #' and \code{GSR}, 3 pairs of shape and rate hyperparameters for gamma priors
 smesir <- function(formula, data, region_populations, outbreak_times, 
-                   mean_removal_time, incidence_probabilities, 
+                   mean_removal_time, incidence_probabilities, dispersion,
                    initial_impulses = 1/region_populations, 
                    region_names = NULL, prior = NULL, inits = "random", 
                    chains = 4, iter = 2000, warmup = floor(iter / 2), thin = 1, 
                    min_adaptation_cycles = 10, min_samps_per_cycle = NULL, 
                    tempering_ratio = 0.2, quiet = TRUE, sr_style = NULL, 
-                   seed = 12345){
+                   seed = NULL){
   ## refer to the classic "lm" function docomentation for how this 
   ## function should be elaborated
   
@@ -161,7 +161,7 @@ smesir <- function(formula, data, region_populations, outbreak_times,
   if(is.null(min_samps_per_cycle)){
     min_samps_per_cycle <- 10*P*P
   }
-  MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, initial_impulses,
+  MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, initial_impulses, dispersion,
                              region_populations, incidence_probabilities, tempering_ratio, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
   
   ## do convergence diagnostics here
