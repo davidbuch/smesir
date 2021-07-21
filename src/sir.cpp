@@ -72,12 +72,45 @@ double log_poisd(const NumericVector y, const NumericVector lambda){
   return res;
 }
 
+
+double log_posterior_single(const arma::vec & Xi,      // PxK matrix of local parameters
+                     const arma::vec & Xi0,     // P vector of global parameters
+                     const arma::vec & V,       // P? vector of variances
+                     const NumericVector Y, // auto pass by reference, I believe
+                     const arma::mat dmat, //Design_Matrices,  // List of K design matrices
+                     const double gamma, // inverse infectious period
+                     const int T_1, // outbreak indices 
+                     const double II, // initial impulses of infection
+                     const int N, // region populations
+                     const NumericVector psi // interval event probability
+)
+{
+  //arma::mat dmat = Design_Matrices[k];
+  arma::vec B = dmat * Xi;
+  // check if parameters are within prior support first
+  bool B_out_of_bounds = arma::any(arma::vectorise(B) < 0);
+  if(B_out_of_bounds){
+    return(log(0));
+  }
+  
+  double res = 0;
+  // add log prior contribution
+  arma::mat X(Xi - Xi0);
+  res += -0.5 * arma::as_scalar( arma::dot(((X*(X.t())).eval()).diag(), 1/V) );
+  
+  // add log likelihood contribution
+  res += log_poisd(Y,solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1,II,N),psi));
+
+  return(res);
+}
+
+
 //[[Rcpp::export]]
 double log_llh(const NumericMatrix B, 
                const NumericMatrix Y, 
                const double gamma, // inverse infectious period
                const IntegerVector T_1, // outbreak indices 
-               const NumericVector Initial_Impulse, // initial impulses of infection
+               const arma::vec & II, // initial impulses of infection
                const IntegerVector N, // region populations
                const NumericVector psi // interval event probability
 ){
@@ -86,7 +119,7 @@ double log_llh(const NumericMatrix B,
   for(int k = 0; k != K; ++k){
     llh += log_poisd(Y(_,k),
                      solve_events(
-                       solve_infections(B(_,k),gamma,T_1(k),Initial_Impulse(k),N(k)),
+                       solve_infections(B(_,k),gamma,T_1(k),II(k),N(k)),
                        psi)
     );
   }
@@ -118,7 +151,7 @@ double log_posterior(const arma::mat & Xi,      // PxK matrix of local parameter
                      const List Design_Matrices,  // List of K design matrices
                      const double gamma, // inverse infectious period
                      const IntegerVector T_1, // outbreak indices 
-                     const NumericVector Initial_Impulse, // initial impulses of infection
+                     const arma::vec & II, // initial impulses of infection
                      const IntegerVector N, // region populations
                      const NumericVector psi // interval event probability
 )
@@ -130,14 +163,25 @@ double log_posterior(const arma::mat & Xi,      // PxK matrix of local parameter
     B.col(k) = dmat * Xi.col(k);
   }
   double res = 0;
-  res += log_llh(NumericMatrix(J,K,B.begin()), Y, gamma, T_1, Initial_Impulse, N, psi);
+  res += log_llh(NumericMatrix(J,K,B.begin()), Y, gamma, T_1, II, N, psi);
   //Rcout << res << " log llh \n" ;
   res += log_prior(Xi,Xi0,V,B);
   //Rcout << res << " log llh + log prior \n";
   return(res);
 }
-
-
+/*
+void update_ii(arma::vec const & Xi,
+               arma::vec & II,
+               )
+{
+  for(int k = 0; k != K; ++k){
+    for(int ii = 5; ii != 100; ii ++= 5){ // supported "number" of initial infected
+      
+    }
+  }
+  
+}
+*/
 void update_xi0(arma::mat const & Xi,
                 arma::vec & Xi0,
                 arma::vec const & V,
@@ -217,7 +261,7 @@ List smesir_mcmc(const NumericMatrix Y,
                  const NumericMatrix IGSR, // (3x2 if hierarchical, 1x2 ow) Gamma Shape and Rate hyperparameters
                  const double gamma, // inverse infectious period
                  const IntegerVector T_1, // outbreak indices 
-                 const NumericVector Initial_Impulse, // initial impulses of infection
+                 const arma::vec Initial_Impulse, // initial impulses of infection
                  const double dispersion, // dispersion == 0 implies poisson likelihood
                  const IntegerVector N, // region populations
                  const NumericVector psi, // interval event probability
@@ -276,8 +320,11 @@ List smesir_mcmc(const NumericMatrix Y,
         Rcout << " " << k + 1;
       }
     }
+    arma::vec Xik_prop = Xik; // armadillo does a deep copy
+    
 
-
+    // initialize initial impulse
+    arma::vec II = Initial_Impulse;
     
     if(!quiet){
       Rcout << "\n...done!\n";
@@ -299,8 +346,7 @@ List smesir_mcmc(const NumericMatrix Y,
     if(!sr_style){
       update_xi0(Xi,Xi0,V,V0); // go ahead and initialize Xi0 among the Xi
     }
-    arma::mat Xi_prop = Xi; // armadillo does a deep copy
- 
+
     if(!quiet){
       Rcout << " done!\n";
       // Rcout << "\t\t Initialized Xi0 = \n";
@@ -338,12 +384,12 @@ List smesir_mcmc(const NumericMatrix Y,
       for(int k = 0; k != K; ++k){
         if(xi_samp_counts[k] < samps_per_cycle){
           Xik = Xi.col(k);
-          Xi_prop.col(k) = Xik + arma::trans(R.slice(k)) * arma::randn(P);
-          double log_acc_prob = log_posterior(Xi_prop,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi) - 
-            log_posterior(Xi,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi);
+          Xik_prop = Xik + arma::trans(R.slice(k)) * arma::randn(P);
+          double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),II(k),N(k),psi) - 
+            log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),II(k),N(k),psi);
           if(arma::as_scalar(arma::randu(1)) < std::exp(log_acc_prob)){
-            Xi.col(k) = Xi_prop.col(k);
-            ap_Xi(xi_samp_counts[k],0,k,arma::size(1,P,1)) = Xi_prop.col(k);
+            Xi.col(k) = Xik_prop;
+            ap_Xi(xi_samp_counts[k],0,k,arma::size(1,P,1)) = Xik_prop;
             xi_samp_counts[k] += 1;
             xi_samps_since_last_accepted[k] = 0;
             acc_rates[k] = (1 + (it - 1)*acc_rates[k])/it;
@@ -354,7 +400,6 @@ List smesir_mcmc(const NumericMatrix Y,
             }
             xi_samps_since_last_accepted[k] += 1;
             acc_rates[k] = (0 + (it - 1)*acc_rates[k])/it;
-            Xi_prop.col(k) = Xi.col(k);
           }
           if(xi_samps_since_last_accepted[k] > 100){
             if(adaptation_cycle == 1){
@@ -372,6 +417,8 @@ List smesir_mcmc(const NumericMatrix Y,
       if(!sr_style){
         update_xi0(Xi,Xi0,V,V0); // modifies Xi0 in place
       }
+      
+      // update II
 
       update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
@@ -445,6 +492,7 @@ List smesir_mcmc(const NumericMatrix Y,
     // allocate storage
     arma::mat chain_Xi(P*K,nstore);
     arma::mat chain_Xi0(P,nstore);
+    arma::mat chain_II(K,nstore);
     arma::mat chain_V(3,nstore);
     
     Rcout << "Begin Sampling... \n\tPercent complete:";
@@ -463,13 +511,11 @@ List smesir_mcmc(const NumericMatrix Y,
       // To-Do: Write a matrix-style update and profile to compare
       for(int k = 0; k != K; ++k){
         Xik = Xi.col(k);
-        Xi_prop.col(k) = Xik + arma::trans(R.slice(k)) * arma::randn(P);
-        double log_acc_prob = log_posterior(Xi_prop,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi) - 
-          log_posterior(Xi,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi);
+        Xik_prop = Xik + arma::trans(R.slice(k)) * arma::randn(P);
+        double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),II(k),N(k),psi) - 
+          log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),II(k),N(k),psi);
         if(arma::as_scalar(arma::randu(1)) < std::exp(log_acc_prob)){
-          Xi.col(k) = Xi_prop.col(k);
-        }else{
-          Xi_prop.col(k) = Xi.col(k);
+          Xi.col(k) = Xik_prop;
         }
       }
       
@@ -478,6 +524,8 @@ List smesir_mcmc(const NumericMatrix Y,
         update_xi0(Xi,Xi0,V,V0); // modifies Xi0 in place
       }
       
+      // update II
+      
       update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
       
@@ -485,6 +533,7 @@ List smesir_mcmc(const NumericMatrix Y,
         int s = (it - warmup)/thin;
         chain_Xi.col(s) = Xi.as_col();
         chain_Xi0.col(s) = Xi0;
+        chain_II.col(s) = II;
         chain_V.col(s) = Vparam;
       }
     }
