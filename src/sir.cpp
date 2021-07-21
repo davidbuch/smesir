@@ -79,14 +79,13 @@ double log_llh(const NumericMatrix B,
                const IntegerVector T_1, // outbreak indices 
                const NumericVector Initial_Impulse, // initial impulses of infection
                const IntegerVector N, // region populations
-               const NumericVector psi, // interval event probability
-               const NumericMatrix frailty
+               const NumericVector psi // interval event probability
 ){
   const int K = Y.ncol();//, J = Y.nrow();
   double llh = 0;
   for(int k = 0; k != K; ++k){
     llh += log_poisd(Y(_,k),
-                     frailty(_,k)*solve_events(
+                     solve_events(
                        solve_infections(B(_,k),gamma,T_1(k),Initial_Impulse(k),N(k)),
                        psi)
     );
@@ -121,8 +120,7 @@ double log_posterior(const arma::mat & Xi,      // PxK matrix of local parameter
                      const IntegerVector T_1, // outbreak indices 
                      const NumericVector Initial_Impulse, // initial impulses of infection
                      const IntegerVector N, // region populations
-                     const NumericVector psi, // interval event probability
-                     const NumericMatrix frailty
+                     const NumericVector psi // interval event probability
 )
 {
   const int J = Y.nrow(), K = Y.ncol(); //, P = Xi.n_rows;
@@ -132,41 +130,13 @@ double log_posterior(const arma::mat & Xi,      // PxK matrix of local parameter
     B.col(k) = dmat * Xi.col(k);
   }
   double res = 0;
-  res += log_llh(NumericMatrix(J,K,B.begin()), Y, gamma, T_1, Initial_Impulse, N, psi, frailty);
+  res += log_llh(NumericMatrix(J,K,B.begin()), Y, gamma, T_1, Initial_Impulse, N, psi);
   //Rcout << res << " log llh \n" ;
   res += log_prior(Xi,Xi0,V,B);
   //Rcout << res << " log llh + log prior \n";
   return(res);
 }
 
-void update_frailty(NumericMatrix frailty,
-                      const double dispersion,
-                      const NumericMatrix Y,
-                      const arma::mat & Xi,
-                      const List Design_Matrices,
-                      const double gamma,
-                      const IntegerVector T_1,
-                      const NumericVector Initial_Impulse,
-                      const IntegerVector N,
-                      const NumericVector psi)
-{
-  const int J = Y.nrow(), K = Y.ncol(); //, P = Xi.n_rows;
-  arma::mat B(J,K);
-  for(int k = 0; k != K; ++k){
-    arma::mat dmat = Design_Matrices[k];
-    B.col(k) = dmat * Xi.col(k);
-  }
-  NumericMatrix expected_events(J,K);
-  for(int k = 0; k != K; ++k){
-    expected_events(_,k) = solve_events(solve_infections(as<NumericVector>(wrap(B.col(k))),gamma,T_1(k),Initial_Impulse(k),N(k)),psi);
-  }
-  
-  for(int j = 0; j != J; ++j){
-    for(int k = 0; k != K; ++k){
-      frailty(j,k) = R::rgamma((Y(j,k) + 1/dispersion),1/(expected_events(j,k) + 1/dispersion));
-    }
-  }
-}
 
 void update_xi0(arma::mat const & Xi,
                 arma::vec & Xi0,
@@ -265,7 +235,7 @@ List smesir_mcmc(const NumericMatrix Y,
   if(!quiet){
     Rcout << "Reached the inside of the function... \n";
   }
-  const int K = Y.ncol(), J = Y.nrow();
+  const int K = Y.ncol(); //, J = Y.nrow();
   NumericMatrix const & Eg_Design_Mat = Design_Matrices[0];
   const int P = Eg_Design_Mat.ncol();
   
@@ -307,12 +277,7 @@ List smesir_mcmc(const NumericMatrix Y,
       }
     }
 
-    NumericMatrix frailty(J,K); // initialize from prior
-    for(int j = 0; j != J; ++j){
-      for(int k = 0; k != K; ++k){
-        frailty(j,k) = R::rgamma(1/dispersion,dispersion);
-      }
-    }
+
     
     if(!quiet){
       Rcout << "\n...done!\n";
@@ -374,8 +339,8 @@ List smesir_mcmc(const NumericMatrix Y,
         if(xi_samp_counts[k] < samps_per_cycle){
           Xik = Xi.col(k);
           Xi_prop.col(k) = Xik + arma::trans(R.slice(k)) * arma::randn(P);
-          double log_acc_prob = log_posterior(Xi_prop,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi,frailty) - 
-            log_posterior(Xi,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi,frailty);
+          double log_acc_prob = log_posterior(Xi_prop,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi) - 
+            log_posterior(Xi,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi);
           if(arma::as_scalar(arma::randu(1)) < std::exp(log_acc_prob)){
             Xi.col(k) = Xi_prop.col(k);
             ap_Xi(xi_samp_counts[k],0,k,arma::size(1,P,1)) = Xi_prop.col(k);
@@ -410,8 +375,6 @@ List smesir_mcmc(const NumericMatrix Y,
 
       update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
-
-      update_frailty(frailty,dispersion,Y,Xi,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi);
 
       cycle_complete = true;
       for(int k = 0; k!=K; ++k){
@@ -501,16 +464,14 @@ List smesir_mcmc(const NumericMatrix Y,
       for(int k = 0; k != K; ++k){
         Xik = Xi.col(k);
         Xi_prop.col(k) = Xik + arma::trans(R.slice(k)) * arma::randn(P);
-        double log_acc_prob = log_posterior(Xi_prop,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi,frailty) - 
-          log_posterior(Xi,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi,frailty);
+        double log_acc_prob = log_posterior(Xi_prop,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi) - 
+          log_posterior(Xi,Xi0,V,Y,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi);
         if(arma::as_scalar(arma::randu(1)) < std::exp(log_acc_prob)){
           Xi.col(k) = Xi_prop.col(k);
         }else{
           Xi_prop.col(k) = Xi.col(k);
         }
       }
-      
-      update_frailty(frailty,dispersion,Y,Xi,Design_Matrices,gamma,T_1,Initial_Impulse,N,psi);
       
       // global params with gibbs proposals
       if(!sr_style){

@@ -21,7 +21,7 @@ smesir <- function(formula, data, region_populations, outbreak_times,
                    mean_removal_time, incidence_probabilities, dispersion,
                    initial_impulses = 1/region_populations, 
                    region_names = NULL, prior = NULL, inits = "random", 
-                   chains = 4, iter = 2000, warmup = floor(iter / 2), thin = 1, 
+                   chains = 4, iter = 50000, warmup = floor(iter / 2), thin = max(floor((iter - warmup)/1000),1), 
                    min_adaptation_cycles = 10, min_samps_per_cycle = NULL, 
                    tempering_ratio = 0.2, quiet = TRUE, sr_style = NULL, 
                    seed = NULL){
@@ -64,7 +64,7 @@ smesir <- function(formula, data, region_populations, outbreak_times,
   }
   # 3. Check that the prior is a list of the valid form  
   if(is.null(prior)){
-    prior <- list(ell = J/5, V0 = c(10,10,1), IGSR = matrix(rep(2,6), nrow = 3, ncol = 2))
+    prior <- list(ell = J/5, V0 = c(10,10,0.1), IGSR = matrix(c(rep(2,4),10,1), nrow = 3, ncol = 2, byrow = TRUE))
   }else{
     if(K == 1){
       if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
@@ -159,7 +159,7 @@ smesir <- function(formula, data, region_populations, outbreak_times,
     print("Reached the Sampling Function")
   }
   if(is.null(min_samps_per_cycle)){
-    min_samps_per_cycle <- 10*P*P
+    min_samps_per_cycle <- 100*P*P # this should be pretty large since samples are autocorrelated
   }
   MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, initial_impulses, dispersion,
                              region_populations, incidence_probabilities, tempering_ratio, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
