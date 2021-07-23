@@ -253,6 +253,16 @@ smesir <- function(formula, data, region_populations, outbreak_times,
     colnames(Xi0) <- predictor_names
   }
 
+  for(chn in 1:chains){
+    II <- matrix(nrow = chains*nstore, ncol = K)
+    for(chn in 1:chains){
+      start_idx_destination <- nstore*(chn-1) + 1
+      end_idx_destination <- nstore*(chn)
+      II[start_idx_destination:end_idx_destination,] <- t(MCMC_Output[[chn]][["II"]])
+    }
+  }
+  colnames(II) <- region_names
+  
   # extract Vparams
   if(!sr_style){
     for(chn in 1:chains){
@@ -280,9 +290,11 @@ smesir <- function(formula, data, region_populations, outbreak_times,
   if(!sr_style){
     samples[["Xi"]] <- Xi
     samples[["Xi0"]] <- Xi0
+    samples[["II"]] <- II
     samples[["V"]] <- V
   }else{
     samples[["Xi"]] <- Xi
+    samples[["II"]] <- II
     samples[["V"]] <- V
   }
   

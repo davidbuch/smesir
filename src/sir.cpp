@@ -61,7 +61,6 @@ NumericVector solve_events(const NumericVector nu, // interval new infections
   return delta;
 }
 
-//[[Rcpp::export]]
 double log_poisd(const NumericVector y, const NumericVector lambda){
   double res = 0;
   for(int i = 0; i != y.length(); ++i){
@@ -104,8 +103,7 @@ double log_posterior_single(const arma::vec & Xi,      // PxK matrix of local pa
   return(res);
 }
 
-
-//[[Rcpp::export]]
+/*
 double log_llh(const NumericMatrix B, 
                const NumericMatrix Y, 
                const double gamma, // inverse infectious period
@@ -169,19 +167,82 @@ double log_posterior(const arma::mat & Xi,      // PxK matrix of local parameter
   //Rcout << res << " log llh + log prior \n";
   return(res);
 }
-/*
-void update_ii(arma::vec const & Xi,
-               arma::vec & II,
+ */
+
+void update_ii(const arma::mat & Xi,      // PxK matrix of local parameters
+               const NumericMatrix Y, // auto pass by reference, I believe
+               const List Design_Matrices,  // List of K design matrices
+               const double gamma, // inverse infectious period
+               const IntegerVector T_1, // outbreak indices 
+               arma::vec & II, // initial impulses of infection
+               const IntegerVector N, // region populations
+               const NumericVector psi, // interval event probability
+               double tempering_factor,
+               bool debug
                )
 {
-  for(int k = 0; k != K; ++k){
-    for(int ii = 5; ii != 100; ii ++= 5){ // supported "number" of initial infected
-      
-    }
-  }
+  const int K = Y.ncol();
+  const int nsupport = 40;
+  const int support_gap = 5;
+  const IntegerVector support_ints = seq(1,nsupport);
   
+
+  
+  for(int k = 0; k != K; ++k){
+    arma::mat dmat = Design_Matrices[k];
+    arma::vec B = dmat * Xi.col(k);
+    
+    NumericVector support_vals = as<NumericVector>(support_ints) * support_gap / N[k];
+    int curr_idx = -1;
+    for(int m = 0; m != nsupport; ++m){
+      if(support_vals[m] == II[k]){
+        curr_idx = m;
+      }
+    }
+
+    int prop_idx = curr_idx - 1 + 2 * (int) (R::runif(0,1) < 0.5); // one step right or left
+    if(debug){
+      Rcout << "Region: " << k << '\n';
+      Rcout << "Currently at: " << curr_idx << '\n';
+      Rcout << "Proposing: " << prop_idx << '\n';
+    }
+    if(prop_idx != nsupport && prop_idx != -1){ // if we "propose" outside the range, we accept the current value
+    double ac_prob = std::exp(tempering_factor * (log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),
+                                  gamma,T_1[k],support_vals[prop_idx],N[k]),psi)) - 
+                                    log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),
+                                                                  gamma,T_1[k],II[k],N[k]),
+                                                                  psi))));
+      if(debug){
+        Rcout << "AC Prob: " << ac_prob << '\n';
+      }
+      if(R::runif(0,1) < ac_prob){
+        II[k] = support_vals[prop_idx];
+        if(debug){
+          Rcout << "accepted !" << prop_idx << '\n';
+        }
+      }
+    }
+
+    
+    /*
+    // Griddy Gibbs strategy (expensive! computes llh for all possible II)
+    NumericVector posterior_weights(nsupport);
+    for(int m = 0; m != nsupport; ++m){ // iterate over members of the support
+      posterior_weights[m] = log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),
+                                                     gamma,T_1[k],support_vals[m],N[k]),
+                                                     psi));
+    }
+    posterior_weights = exp(posterior_weights - max(posterior_weights));
+    posterior_weights = posterior_weights/sum(posterior_weights);
+    support_vals = sample(support_vals,1,true,posterior_weights);
+    II[k] = support_vals[0];
+    */
+  }
+  if(debug){
+    stop("whoops!");
+  }
 }
-*/
+
 void update_xi0(arma::mat const & Xi,
                 arma::vec & Xi0,
                 arma::vec const & V,
@@ -280,6 +341,10 @@ List smesir_mcmc(const NumericMatrix Y,
     Rcout << "Reached the inside of the function... \n";
   }
   const int K = Y.ncol(); //, J = Y.nrow();
+  
+  IntegerVector consecutive_unchanged(K,0);
+  bool debug = false;
+  
   NumericMatrix const & Eg_Design_Mat = Design_Matrices[0];
   const int P = Eg_Design_Mat.ncol();
   
@@ -387,7 +452,7 @@ List smesir_mcmc(const NumericMatrix Y,
           Xik_prop = Xik + arma::trans(R.slice(k)) * arma::randn(P);
           double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),II(k),N(k),psi) - 
             log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),II(k),N(k),psi);
-          if(arma::as_scalar(arma::randu(1)) < std::exp(log_acc_prob)){
+          if(R::runif(0,1) < std::exp(log_acc_prob)){
             Xi.col(k) = Xik_prop;
             ap_Xi(xi_samp_counts[k],0,k,arma::size(1,P,1)) = Xik_prop;
             xi_samp_counts[k] += 1;
@@ -418,8 +483,23 @@ List smesir_mcmc(const NumericMatrix Y,
         update_xi0(Xi,Xi0,V,V0); // modifies Xi0 in place
       }
       
+      arma::vec old_II = II;
       // update II
+      update_ii(Xi,Y,Design_Matrices,gamma,T_1,II,N,psi,tempering_factor,debug);
 
+      for(int k = 0; k != K; ++k){
+        if(II[k] == old_II[k]){
+          consecutive_unchanged(k) += 1;
+          if(consecutive_unchanged(k) > 1e3){
+            //Rcout << "\nProblem in region " << k << '\n';
+            //Rcout << "Samps since last update: " << consecutive_unchanged << '\n';
+            //debug = true;
+          }
+        }else{
+          consecutive_unchanged(k) = 0;
+        }
+      }
+      
       update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
 
@@ -428,6 +508,10 @@ List smesir_mcmc(const NumericMatrix Y,
         cycle_complete = cycle_complete && (xi_samp_counts[k] == samps_per_cycle);
       }
       if(cycle_complete){
+        if(tempering_factor == 1){
+          cycles_post_tempering += 1;
+        }
+        
         //compute covariances
         for(int k = 0; k!= K; ++k){
           // magic number comes from 2.38^2, see article Haario et al (2001)
@@ -439,15 +523,13 @@ List smesir_mcmc(const NumericMatrix Y,
             arma::mat meanSigHat = ((cycles_post_tempering*samps_per_cycle - P)*oldSigHat + 
               (samps_per_cycle - P)*newSigHat)/((cycles_post_tempering+1)*samps_per_cycle - P);
             R.slice(k) = arma::chol(meanSigHat);
-            cycles_post_tempering += 1;
           }
-          
         }
+
         
         // print status updates
         if(!quiet){
-          Rcout << " " << adaptation_cycle;
-          Rcout << "Adaptation Cycle No.: " << adaptation_cycle << "\n";
+          Rcout << "Adaptation Cycle: " << adaptation_cycle << "\n";
           Rcout << "Total Iterations: " << it << "\n";
           Rcout << "Acceptance Rates: " << acc_rates << "\n";
           Rcout << "Tempering Factor: " << tempering_factor << "\n";
@@ -456,13 +538,13 @@ List smesir_mcmc(const NumericMatrix Y,
         // was this the last cycle?
         achieved_optimal_acc_rate = true;
         for(int k = 0; k!= K; ++k){
-          achieved_optimal_acc_rate = achieved_optimal_acc_rate && (0.25 < acc_rates[k]) && (acc_rates[k] < 0.4);
+          achieved_optimal_acc_rate = achieved_optimal_acc_rate && (0.11 < acc_rates[k]) && (acc_rates[k] < 0.4);
           if(acc_rates[k] > 0.6 && tempering_factor == 1){
             R.slice(k) = 3.16*R.slice(k); // multiply covariance by 10
           }
         }
         
-        if((adaptation_cycle > ncycles) && ((cycles_post_tempering >= 10) || achieved_optimal_acc_rate)){
+        if((adaptation_cycle > ncycles) && (achieved_optimal_acc_rate)){ // (cycles_post_tempering >= 10) ||
           adapting = 0;
         }else{
           it = 0; // reset iteration number
@@ -477,9 +559,7 @@ List smesir_mcmc(const NumericMatrix Y,
             acc_rates[k] = 0.0;
           }
         }
-        if(adaptation_cycle > 100){
-          stop("Over 100 adaptation cycles required: is something wrong?");
-        }
+
       }
     }
     if(!quiet){
@@ -514,7 +594,7 @@ List smesir_mcmc(const NumericMatrix Y,
         Xik_prop = Xik + arma::trans(R.slice(k)) * arma::randn(P);
         double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),II(k),N(k),psi) - 
           log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),II(k),N(k),psi);
-        if(arma::as_scalar(arma::randu(1)) < std::exp(log_acc_prob)){
+        if(R::runif(0,1) < std::exp(log_acc_prob)){
           Xi.col(k) = Xik_prop;
         }
       }
@@ -525,6 +605,7 @@ List smesir_mcmc(const NumericMatrix Y,
       }
       
       // update II
+      update_ii(Xi,Y,Design_Matrices,gamma,T_1,II,N,psi,tempering_factor,debug);
       
       update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
@@ -541,6 +622,7 @@ List smesir_mcmc(const NumericMatrix Y,
     List chain_output;
     chain_output["Xi"] = chain_Xi;
     chain_output["Xi0"] = chain_Xi0;
+    chain_output["II"] = chain_II;
     chain_output["V"] = chain_V;
     MCMC_output[chn] = chain_output;
   }
