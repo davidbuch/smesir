@@ -177,53 +177,75 @@ void update_ii(const arma::mat & Xi,      // PxK matrix of local parameters
                arma::vec & II, // initial impulses of infection
                const IntegerVector N, // region populations
                const NumericVector psi, // interval event probability
+               const double prior_rate,
+               const arma::vec & proposal_sd,
                double tempering_factor,
                bool debug
                )
 {
   const int K = Y.ncol();
-  const int nsupport = 40;
-  const int support_gap = 5;
-  const IntegerVector support_ints = seq(1,nsupport);
   
-
   
   for(int k = 0; k != K; ++k){
     arma::mat dmat = Design_Matrices[k];
     arma::vec B = dmat * Xi.col(k);
     
-    NumericVector support_vals = as<NumericVector>(support_ints) * support_gap / N[k];
-    int curr_idx = -1;
-    for(int m = 0; m != nsupport; ++m){
-      if(support_vals[m] == II[k]){
-        curr_idx = m;
-      }
-    }
-
-    int prop_idx = curr_idx - 1 + 2 * (int) (R::runif(0,1) < 0.5); // one step right or left
+    
+    double prop = II[k] + R::rnorm(0,proposal_sd[k])/N[k];
+    prop = (prop > 0 ? prop : -prop); // reflect at 0
+    double ac_prob = std::exp(
+      - (prop - II[k]) * (N[k] * prior_rate) + // don't temper the prior contribution
+      tempering_factor * (log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1[k],prop,N[k]),psi)) - 
+        log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1[k],II[k],N[k]),psi))));
+    
     if(debug){
-      Rcout << "Region: " << k << '\n';
-      Rcout << "Currently at: " << curr_idx << '\n';
-      Rcout << "Proposing: " << prop_idx << '\n';
+      Rcout << "AC Prob: " << ac_prob << '\n';
     }
-    if(prop_idx != nsupport && prop_idx != -1){ // if we "propose" outside the range, we accept the current value
-    double ac_prob = std::exp(tempering_factor * (log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),
-                                  gamma,T_1[k],support_vals[prop_idx],N[k]),psi)) - 
-                                    log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),
-                                                                  gamma,T_1[k],II[k],N[k]),
-                                                                  psi))));
+    if(R::runif(0,1) < ac_prob){
+      II[k] = prop;
       if(debug){
-        Rcout << "AC Prob: " << ac_prob << '\n';
-      }
-      if(R::runif(0,1) < ac_prob){
-        II[k] = support_vals[prop_idx];
-        if(debug){
-          Rcout << "accepted !" << prop_idx << '\n';
-        }
+        Rcout << "accepted" << prop << '\n';
       }
     }
 
     
+    // discrete search
+    // const int nsupport = 40;
+    // const int support_gap = 5;
+    // const IntegerVector support_ints = seq(1,nsupport);
+    // 
+    // NumericVector support_vals = as<NumericVector>(support_ints) * support_gap / N[k];
+    // int curr_idx = -1;
+    // for(int m = 0; m != nsupport; ++m){
+    //   if(support_vals[m] == II[k]){
+    //     curr_idx = m;
+    //   }
+    // }
+    // 
+    // int prop_idx = curr_idx - 1 + 2 * (int) (R::runif(0,1) < 0.5); // one step right or left
+    // if(debug){
+    //   Rcout << "Region: " << k << '\n';
+    //   Rcout << "Currently at: " << curr_idx << '\n';
+    //   Rcout << "Proposing: " << prop_idx << '\n';
+    // }
+    // if(prop_idx != nsupport && prop_idx != -1){ // if we "propose" outside the range, we accept the current value
+    // double ac_prob = std::exp( tempering_factor * (log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),
+    //                               gamma,T_1[k],support_vals[prop_idx],N[k]),psi)) - 
+    //                                 log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),
+    //                                                               gamma,T_1[k],II[k],N[k]),
+    //                                                               psi))));
+    //   if(debug){
+    //     Rcout << "AC Prob: " << ac_prob << '\n';
+    //   }
+    //   if(R::runif(0,1) < ac_prob){
+    //     II[k] = support_vals[prop_idx];
+    //     if(debug){
+    //       Rcout << "accepted !" << prop_idx << '\n';
+    //     }
+    //   }
+    // }
+    // 
+    // 
     /*
     // Griddy Gibbs strategy (expensive! computes llh for all possible II)
     NumericVector posterior_weights(nsupport);
@@ -321,9 +343,8 @@ List smesir_mcmc(const NumericMatrix Y,
                  const arma::vec & V0param, // pre-expanded variance hyperparameters
                  const NumericMatrix IGSR, // (3x2 if hierarchical, 1x2 ow) Gamma Shape and Rate hyperparameters
                  const double gamma, // inverse infectious period
-                 const IntegerVector T_1, // outbreak indices 
-                 const arma::vec Initial_Impulse, // initial impulses of infection
-                 const double dispersion, // dispersion == 0 implies poisson likelihood
+                 const IntegerVector T_1, // outbreak indices
+                 const double prior_expected_ip, // expected infectious population
                  const IntegerVector N, // region populations
                  const NumericVector psi, // interval event probability
                  const double tempering_ratio,
@@ -389,7 +410,12 @@ List smesir_mcmc(const NumericMatrix Y,
     
 
     // initialize initial impulse
-    arma::vec II = Initial_Impulse;
+    const double ii_prior_rate = 1.0/prior_expected_ip;
+    arma::vec ii_proposal_sd(K,arma::fill::ones); // we will adapt this based on sample variance later
+    arma::vec II(K);
+    for(int k = 0; k != K; ++k){
+      II[k] = R::rgamma(1,1/(ii_prior_rate*N[k])); // randomly initialize II ~ exp(1/(pr*N[k]))
+    }
     
     if(!quiet){
       Rcout << "\n...done!\n";
@@ -422,6 +448,8 @@ List smesir_mcmc(const NumericMatrix Y,
     }
     
     /* Adaptation Phase */
+    
+    // prep to adapt Xi proposal covariance
     arma::vec C0diag(P,arma::fill::ones);
     C0diag.subvec(1+ncovs,P - 1) = lambda/10; C0diag = (0.1/P)*C0diag;
     arma::mat C0 = arma::diagmat(C0diag);
@@ -429,6 +457,12 @@ List smesir_mcmc(const NumericMatrix Y,
     for(int k = 0; k != K; ++k){
       R.slice(k) = arma::chol(C0);
     }
+    
+    // prep to adapt II proposal variances
+    arma::vec ii_current_mean(K,arma::fill::ones);
+    arma::vec ii_current_var(K,arma::fill::ones);
+    int ii_samp_count = 0;
+    
     // /*
     // arguments tempering_ratio, ncycles, samps per cycle, quiet
     IntegerVector xi_samp_counts(K,0);
@@ -468,12 +502,14 @@ List smesir_mcmc(const NumericMatrix Y,
           }
           if(xi_samps_since_last_accepted[k] > 100){
             if(adaptation_cycle == 1){
-              tempering_factor = tempering_factor/5;
+              //tempering_factor = tempering_factor/5;
+              //R.slice(k) = R.slice(k)/3.16; // divide proposal covariance by 10
             }
             R.slice(k) = R.slice(k)/3.16; // divide proposal covariance by 10
-            for(int kk = 0; kk != K; ++kk){
-              xi_samps_since_last_accepted[kk] = 0;
-            }
+            xi_samps_since_last_accepted[k] = 0;
+            // for(int kk = 0; kk != K; ++kk){
+            //   xi_samps_since_last_accepted[kk] = 0;
+            // }
           }
         }
       }
@@ -485,20 +521,36 @@ List smesir_mcmc(const NumericMatrix Y,
       
       arma::vec old_II = II;
       // update II
-      update_ii(Xi,Y,Design_Matrices,gamma,T_1,II,N,psi,tempering_factor,debug);
+      update_ii(Xi,Y,Design_Matrices,gamma,T_1,II,N,psi,
+                ii_prior_rate,ii_proposal_sd,tempering_factor,debug);
 
-      for(int k = 0; k != K; ++k){
+      
+      ii_samp_count += 1;
+      for(int k = 0; k != K; ++k){ 
+        ii_current_var[k] = ((ii_samp_count - 1)*ii_current_var[k]/ii_samp_count) + 
+          ii_current_mean[k]*ii_current_mean[k] + N[k]*II[k]*N[k]*II[k]/ii_samp_count; // partially update var
+        ii_current_mean[k] = (ii_samp_count*ii_current_mean[k] + N[k]*II[k])/(ii_samp_count + 1); // update mean
+        ii_current_var[k] -= (ii_samp_count + 1)*ii_current_mean[k]*ii_current_mean[k]/ii_samp_count; // finish updating var
+        ii_proposal_sd[k] = 2.4*std::sqrt(ii_current_var[k]);
+        //Rcout << ii_proposal_sd[k] << "\t";
+      }
+      //Rcout << '\n';
+
+      // we should plot the trajectory of ii_prop_sd over time for the user, or just print it out
+      
+      /*for(int k = 0; k != K; ++k){
         if(II[k] == old_II[k]){
           consecutive_unchanged(k) += 1;
-          if(consecutive_unchanged(k) > 1e3){
-            //Rcout << "\nProblem in region " << k << '\n';
-            //Rcout << "Samps since last update: " << consecutive_unchanged << '\n';
-            //debug = true;
+          if(consecutive_unchanged(k) > 1e2){
+            if(adaptation_cycle == 1){
+              //tempering_factor = tempering_factor/5;
+            }
+            consecutive_unchanged.fill(0);
           }
         }else{
           consecutive_unchanged(k) = 0;
         }
-      }
+      }*/
       
       update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
@@ -538,13 +590,13 @@ List smesir_mcmc(const NumericMatrix Y,
         // was this the last cycle?
         achieved_optimal_acc_rate = true;
         for(int k = 0; k!= K; ++k){
-          achieved_optimal_acc_rate = achieved_optimal_acc_rate && (0.11 < acc_rates[k]) && (acc_rates[k] < 0.4);
+          achieved_optimal_acc_rate = achieved_optimal_acc_rate && (0.1 < acc_rates[k]) && (acc_rates[k] < 0.4);
           if(acc_rates[k] > 0.6 && tempering_factor == 1){
             R.slice(k) = 3.16*R.slice(k); // multiply covariance by 10
           }
         }
         
-        if((adaptation_cycle > ncycles) && (achieved_optimal_acc_rate)){ // (cycles_post_tempering >= 10) ||
+        if((adaptation_cycle > ncycles) && (achieved_optimal_acc_rate || (cycles_post_tempering >= 10))){
           adapting = 0;
         }else{
           it = 0; // reset iteration number
@@ -575,6 +627,7 @@ List smesir_mcmc(const NumericMatrix Y,
     arma::mat chain_II(K,nstore);
     arma::mat chain_V(3,nstore);
     
+
     Rcout << "Begin Sampling... \n\tPercent complete:";
     int percent_complete = 0;
     int percent_increment = 10;
@@ -605,7 +658,8 @@ List smesir_mcmc(const NumericMatrix Y,
       }
       
       // update II
-      update_ii(Xi,Y,Design_Matrices,gamma,T_1,II,N,psi,tempering_factor,debug);
+      update_ii(Xi,Y,Design_Matrices,gamma,T_1,II,N,psi,
+                ii_prior_rate,ii_proposal_sd,1,debug);
       
       update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
