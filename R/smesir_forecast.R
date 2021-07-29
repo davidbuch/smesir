@@ -1,33 +1,39 @@
-#' smesir: 
+#' smesir_forecast: 
 #' @description
-#' Forecasts incidence events 
+#' Forecasts incidence events within the smeSIR model framework. A companion
+#' function to \code{smesir}.
 #' 
 #' @param Jf Integer length of the forecast time horizon
 #' @param model_fit A list returned from the \code{smesir} function
-#' @param new_x An optional list containing covariate data to be used in forecasting
-smesir_forecast <- function(Jf, model_fit, new_x = NULL, region_populations, outbreak_times, 
-                            mean_removal_time, incidence_probabilities, dispersion,
-                            initial_impulses = 1/region_populations){
-  # unpack the model_fit object
+#' @param new_x An list containing covariate data with which to forecast, as needed by
+#' by the model fit in the antecedent "model_fit" call.
+#' @export
+smesir_forecast <- function(Jf, model_fit, new_x = NULL){
+  ## Unpack the model_fit object and preliminary tests
   prior <- model_fit[["prior"]]
   formula <- model_fit[["formula"]]
   xi_samps <- model_fit[["samples"]][["Xi"]]
   
+  N <- model_fit$epi_params$region_populations
+  T_1 <- model_fit$epi_params$outbreak_times
+  gamma <- 1/model_fit$epi_params$mean_removal_time
+  psi <- model_fit$epi_params$incidence_probabilities
+  
+  design_matrices <- model_fit[["design_matrices"]]
+  
   ell <- prior[["ell"]]
   V0 <- prior[["V0"]]
   IGSR <- prior[["IGSR"]]
+  
+  K <- length(design_matrices)
+  J <- nrow(design_matrices[[1]])
+  nsamps <- nrow(xi_samps)
   
   covariate_names <- all.vars(formula[[3]]) # this is really nice because it throws errors for one sided formulas
   response_name <- all.vars(formula[[2]])
   if(length(response_name) != 1) stop("Error in argument 'formula': Response must be univariate.")
   if(!attr(terms(formula),"intercept")) stop("Error in argument 'formula': smeSIR model must have an intercept.")
   
-  
-  if(length(dim(xi_samps)) == 3){
-    K <- dim(xi_samps)[3]
-  }else{
-    K <- 1
-  }
   sr_style <- model_fit[["sr_style"]]
   if(!sr_style){
     sigma2_samps <- model_fit[["samples"]][["V"]][,3]
@@ -35,6 +41,8 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, region_populations, out
     sigma2_samps <- model_fit[["samples"]][["V"]]
   }
   
+  ## Create forecasting design matrices
+  # Recreate GP covariance matrix from the model fit
   S_fit <- exp(-as.matrix(dist(1:J, diag = TRUE, upper = TRUE)/ell)^2)
   S_fit <- scale(S_fit, center = TRUE, scale = FALSE) # Project out the intercept
   kernel_decomp <- eigen(S_fit,symmetric = TRUE)
@@ -42,9 +50,8 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, region_populations, out
   ebasis <- kernel_decomp$vectors[,1:rfit]
   lambda <- kernel_decomp$values[1:rfit]
   
-  
-  Jt = J + Jf;
-  
+  # Create GP covariance matrix for the complete model
+  Jt = J + Jf
   S <- exp(-as.matrix(dist(1:Jt, diag = TRUE, upper = TRUE)/ell)^2)
   S <- Re(scale(S, center = TRUE, scale = FALSE)) # Project out the intercept
   
@@ -60,7 +67,7 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, region_populations, out
   kernel_decomp$values <- sapply(kernel_decomp$values,function(x) max(x,0))
   rf <- match(TRUE, cumsum(kernel_decomp$values)/sum(kernel_decomp$values) > .99)
   ebasis_forecasting <- kernel_decomp$vectors[,1:rf]
-  colnames(ebasis_forecasting) <- paste("GPf Basis Func.",1:rf)
+  colnames(ebasis_forecasting) <- paste("GP Basis Func.",1:rf)
   vscales_theta_forecasting <- kernel_decomp$values[1:rf]
   
   design_matrices_forecast <- list()
@@ -91,64 +98,67 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, region_populations, out
       design_matrices_forecast[[k]] <- cbind(design_mat,ebasis_forecasting) ## attach eigenbasis
     }
   }
-  ncov <- ncol(design_mat) - 1
-  P <- ncol(design_matrices_forecast[[1]]) # number of "predictors"
-  predictor_names <- colnames(design_matrices_forecast[[1]])
   vparam_names <- c("Variance(Intercept)", "Variance(Covariate Coeffs.)", "Variance(GP Random Effect)")
-  # names(design_matrices_forecast) <- region_names
-   
 
-  # apply mu_transform to samples of xi to get the predictive mean
-  # draw independent gaussians with variances "vscales_theta_forecasting"
-  # premultiply those coefficients by ebasis_forecasting and add them to 
-  # the predictive means we have determined.
-  # Thereby we will get a sample from the posterior
-  forecast_beta <- array(dim = c(nsamps,Jf,K))
-  for(k in 1:K){
-    forecast_expectations <- xi_samps[,(1+ncov+1):P,k]%*%t(mu_transform)
+  P <- ncol(design_matrices[[1]]) # number of "predictors" (including intercept and GP bases)
+  nterms <- P - rfit - 1 # not the same as the number of covariates (e.g., factor expansions)
+  predictor_names <- colnames(design_matrices[[1]][,1:nterms])
+
+  
+  ## Transform coefficient samples into forecast samples
+  if(K == 1){
+    forecast_beta <- array(dim = c(Jf,nsamps))
+    beta_samps <- array(dim = c(J + Jf, nsamps))    
+    
+    forecast_expectations <- mu_transform %*% t(xi_samps[,(1+nterms+1):P])
     forecast_theta <- sapply(sigma2_samps, function(sigma2){rnorm(rf, sd = sqrt(sigma2*vscales_theta_forecasting))})
-    forecast_noise <- t(ebasis_forecasting%*%forecast_theta)
-    #print(dim(forecast_expectations))
-    #print(dim(forecast_noise))
-    forecast_beta[,,k] <- forecast_expectations + forecast_noise + xi_samps[,1:(1+ncov),k]%*%t(as.matrix(design_matrices_forecast[[k]][,1:(1+ncov)]))
-  }
-
-  
-  deaths_comp <- function(beta_samp){
-    rpois(length(beta_samp),solve_events(solve_infections(beta_samp,
-                                                          gamma, outbreak_times[k],
-                                                          1/region_pops[k], region_pops[k]),psi))
-  }
-  
-  beta_samps <- array(dim = c(nsamps,J,K))
-  for(k in 1:K){
-    beta_samps[,,k] <- mfit$samples$Xi[,,k] %*% t(mfit$design_matrices[[k]])
-    matplot(t(apply(cbind(beta_samps[,,k],forecast_beta[,,k]),2,function(x) quantile(x,c(0.025,0.5,0.975)))), type = "l")
-  }
-  
-  death_samps <- array(dim = c(J + Jf,nsamps,K))
-  deaths_CI <- array(dim = c(J + Jf,2,K))
-  for(k in 1:K){
-    deaths_comp <- function(beta_samp){
-      if(dispersion > 0){
-      rnbinom(length(beta_samp),size = 1/dispersion, mu = solve_events(solve_infections(beta_samp,
-                                                            1/mean_removal_time, outbreak_times[k],
-                                                            initial_impulses[k], region_populations[k]),
-                                           incidence_probabilities))
-      }else if(dispersion == 0){
-        rpois(length(beta_samp),solve_events(solve_infections(beta_samp,
-                                                              1/mean_removal_time, outbreak_times[k],
-                                                              initial_impulses[k], region_populations[k]),
-                                             incidence_probabilities))
-      }else{stop("Invalid dispersion parameter")}
+    forecast_noise <- ebasis_forecasting%*%forecast_theta
+    forecast_beta <- forecast_expectations + forecast_noise + as.matrix(design_matrices_forecast[[k]][,1:(1+nterms)])%*%t(xi_samps[,1:(1+nterms)])
+    beta_samps <- rbind(design_matrices[[k]] %*% t(xi_samps),forecast_beta)
+    beta_samps <- pmax(beta_samps,0)
+    
+    event_samps <- array(dim = c(J + Jf, nsamps))
+    event_CI <- array(dim = c(J + Jf, 2))
+    
+    event_comp <- function(beta_samp,ii_samp){
+      rpois(length(beta_samp), solve_events(solve_infections(beta_samp,
+                                                            gamma, T_1[k],
+                                                            ii_samp, N[k]),psi))
     }
-    #print(dim(apply(cbind(beta_samps[,,k],forecast_beta[,,k]),1,deaths_comp)))
-    death_samps[,,k] <- apply(cbind(beta_samps[,,k],forecast_beta[,,k]),1,deaths_comp)
-    #plot(rowMeans(death_samps[,,k]),type = "l")
-    #print(dim(apply(death_samps[,,k],1,function(x) quantile(x,c(0.025,0.975)))))
-    deaths_CI[,,k] <- t(apply(death_samps[,,k],1,function(x) quantile(x,c(0.025,0.975))))
+    for(s in 1:nsamps){
+      event_samps[,s] <- event_comp(beta_samps[,s],model_fit$samples$II[s])
+    }
+    event_CI <- t(apply(event_samps,1,function(x) quantile(x, c(0.025,0.975))))
+  }else{
+    forecast_beta <- array(dim = c(Jf,nsamps,K))
+    beta_samps <- array(dim = c(J + Jf, nsamps,K))
+    for(k in 1:K){
+      forecast_expectations <- mu_transform %*% t(xi_samps[,(1+nterms+1):P,k])
+      forecast_theta <- sapply(sigma2_samps, function(sigma2){rnorm(rf, sd = sqrt(sigma2*vscales_theta_forecasting))})
+      forecast_noise <- ebasis_forecasting%*%forecast_theta
+      forecast_beta[,,k] <- forecast_expectations + forecast_noise + as.matrix(design_matrices_forecast[[k]][,1:(1+nterms)])%*%t(xi_samps[,1:(1+nterms),k])
+      beta_samps[,,k] <- rbind(design_matrices[[k]] %*% t(xi_samps[,,k]),forecast_beta[,,k])
+      beta_samps[,,k] <- pmax(beta_samps[,,k],0)
+      # plot(rowMeans(beta_samps[,,k]), type = "l", ylim = c(0,3), main = k)
+      # plot_confint(t(apply(beta_samps[,,k],1,function(x) quantile(x,c(0.025,0.975)))),density=15,col = "blue")
+    }
+    
+    event_samps <- array(dim = c(J + Jf, nsamps,K))
+    event_CI <- array(dim = c(J + Jf, 2,K))
+    for(k in 1:K){
+      event_comp <- function(beta_samp,ii_samp){
+        rpois(length(beta_samp), solve_events(solve_infections(beta_samp,
+                                                              gamma, T_1[k],
+                                                              ii_samp, N[k]),psi))
+      }
+      print(paste(T_1[k],N[k],gamma))
+      for(s in 1:nsamps){
+        event_samps[,s,k] <- event_comp(beta_samps[,s,k],model_fit$samples$II[s,k])
+      }
+      event_CI[,,k] <- t(apply(event_samps[,,k],1,function(x) quantile(x, c(0.025,0.975))))
+    }
   }
-  forecast_dat <- list(samples = death_samps, summary = deaths_CI)
+  forecast_dat <- list(samples = event_samps, confints = event_CI)
   
   return(forecast_dat)
 }

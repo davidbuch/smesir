@@ -11,21 +11,34 @@
 #' centered at "global" intercept, coefficient, and temporal random effect
 #' values. 
 #' 
-#' @param formula an object of class "formula" 
-#' @param data A length \code{P + 2} named list containing the data 
-#' with which the model will be fit. Each name should match a name in
-#' the provided \code{formula} argument
-#' @param prior A length 2 named list containing \code{V0}, 3 variance hyperparameters for gaussian priors,
-#' and \code{GSR}, 3 pairs of shape and rate hyperparameters for gamma priors
-smesir <- function(formula, data, region_populations, outbreak_times, 
-                   mean_removal_time, incidence_probabilities,
-                   region_names = NULL, prior = NULL, inits = "random", 
+#' @param formula Object of class "formula" 
+#' @param data A named list containing the data with which the model will be fit. 
+#' The list should include an entry for each term in the accompanying \code{formula} argument.
+#' @param epi_params Epidemiologic parameters which must be specified by the user (typically obtained from side-information):
+#' \code{region_populations} - Vector of populations of the regions studied, listed in the same order in which they are indexed in the data
+#' \code{outbreak_times} - Vector of indices of the time interval at which the first cases are reported in each region
+#' \code{mean_removal_time} - Average amount of time (in number or fractions of time intervals) that an individual remains infectious
+#' \code{psi} - Vector of probabilities whose element \code{i} is the probability that the response event (case detection, death) occurs an infected individual \code{i - 1} time intervals after their infection
+#' @param prior (Optional - reasonable default values are specified internally) A length 4 named list containing:
+#' \code{ell} - lengthscale of the squared exponential kernal for the temporal random effect
+#' \code{V0} - 3 variance hyperparameters for gaussian priors on the intercepts, coefficients, and temporal random effects;
+#' \code{IGSR} - 3 pairs of shape and rate hyperparameters for inverse-gamma priors;
+#' \code{expected_initial_infected} - the expected size of the infected population that appears at the beginning of the outbreak, used in an exponential prior; 
+#' @param region_names Vector of names of the regions studied, listed in the same order in which they are indexed in the data
+#' @export
+smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
                    chains = 4, iter = 50000, warmup = 0, thin = max(floor((iter - warmup)/1000),1), 
                    min_adaptation_cycles = 5, min_samps_per_cycle = NULL, 
                    tempering_ratio = 0.2, quiet = TRUE, sr_style = NULL, 
                    seed = NULL){
   ## refer to the classic "lm" function docomentation for how this 
   ## function should be elaborated
+  
+  ## Unpack epi_params
+  N <- epi_params$region_populations
+  T_1 <- epi_params$outbreak_times
+  gamma <- epi_params$mean_removal_time
+  psi <- epi_params$incidence_probabilities
   
   ## Sanity check all arguments
   
@@ -63,7 +76,7 @@ smesir <- function(formula, data, region_populations, outbreak_times,
   }
   # 3. Check that the prior is a list of the valid form  
   if(is.null(prior)){
-    prior <- list(ell = J/5, V0 = c(10,10,0.1), IGSR = matrix(c(rep(2,4),10,1), nrow = 3, ncol = 2, byrow = TRUE))
+    prior <- list(ell = J/5, V0 = c(10,10,0.1), expected_initial_infected = 50.0, IGSR = matrix(c(rep(2,4),10,1), nrow = 3, ncol = 2, byrow = TRUE))
   }else{
     if(K == 1){
       if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
@@ -74,6 +87,9 @@ smesir <- function(formula, data, region_populations, outbreak_times,
       }
       if(!is.numeric(prior[["IGSR"]]) || length(prior[["IGSR"]]) != 2 || any(prior[["IGSR"]] <= 0)){
         stop("prior[['IGSR']] must be a length 2 positive numeric vector (single-region style)")
+      }
+      if(!is.numeric(prior[["expected_initial_infected"]]) || length(prior[["expected_initial_infected"]]) != 1 || prior[["expected_initial_infected"]] <= 0){
+        stop("prior[['expected_initial_infected']] must be a positive scalar")
       }
       prior[["V0"]] <- c(prior[["V0"]],1) # last value placeholder
       prior[["IGSR"]] <- matrix(rep(prior[["IGSR"]],3), nrow = 3, ncol = 2,  byrow = TRUE)
@@ -87,11 +103,15 @@ smesir <- function(formula, data, region_populations, outbreak_times,
       if(!is.numeric(prior[["IGSR"]]) || dim(prior[["IGSR"]]) != c(3,2) || any(prior[["IGSR"]] <= 0)){
         stop("prior[['IGSR']] must be a 3x2 positive numeric matrix")
       }
+      if(!is.numeric(prior[["expected_initial_infected"]]) || length(prior[["expected_initial_infected"]]) != 1 || prior[["expected_initial_infected"]] <= 0){
+        stop("prior[['expected_initial_infected']] must be a positive scalar")
+      }
     }
   }
   ell <- prior[["ell"]]
   V0 <- prior[["V0"]]
   IGSR <- prior[["IGSR"]]
+  expected_initial_infected <- prior[["expected_initial_infected"]]
   
   ## We will need the eigendecomposition of the scaled GP covariance matrix
   ## when we construct our design matrix
@@ -160,7 +180,7 @@ smesir <- function(formula, data, region_populations, outbreak_times,
   if(is.null(min_samps_per_cycle)){
     min_samps_per_cycle <- 10*P*P # this should be pretty large since samples are autocorrelated
   }
-  MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, 50.0,
+  MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected,
                              region_populations, incidence_probabilities, tempering_ratio, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
   
   ## do convergence diagnostics here
@@ -335,6 +355,7 @@ smesir <- function(formula, data, region_populations, outbreak_times,
                  prior = prior,
                  formula = formula,
                  sr_style = sr_style,
-                 design_matrices = design_matrices)
+                 design_matrices = design_matrices,
+                 epi_params = epi_params)
   return(output)
 }
