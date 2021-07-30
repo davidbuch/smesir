@@ -167,23 +167,23 @@ void update_Vparam(arma::mat const & Xi,
   double a = 0, b = 0;
   if(vparam_key[0]){
     a = (2*IGSR(0,0) + K)/2;
-    b = (2*IGSR(0,1) + ss_diag(0))/2;
-    Vparam(0) = 1/arma::as_scalar(arma::randg<arma::vec>(1,arma::distr_param(a,b)));
+    b = 2/(2*IGSR(0,1) + ss_diag(0)); // scale parameter
+    Vparam(0) = 1/arma::randg<double>(arma::distr_param(a,b));
   }
   // update variance of local coefficient params around the global coefficient params
   if(vparam_key[1]){
     a = (2*IGSR(1,0) + ncovs*K)/2;
     /* subvec indices are inclusive */
-    b = (2*IGSR(1,1) + arma::sum(ss_diag.subvec(1,1+ncovs-1)) )/2;
-    Vparam(1) = 1/arma::as_scalar(arma::randg<arma::vec>(1,arma::distr_param(a,b)));
+    b = 2/(2*IGSR(1,1) + arma::sum(ss_diag.subvec(1,1+ncovs-1))); // scale parameter
+    Vparam(1) = 1/arma::randg<double>(arma::distr_param(a,b));
   }
   
   //update variance of local gp basis params around global gp basis params
   if(vparam_key[2]){
     a = (2*IGSR(2,0) + nbases*K)/2;
     /* subvec indices are inclusive */
-    b = (2*IGSR(2,1) + arma::sum(ss_diag.subvec(1+ncovs,P-1)/lambda))/2;
-    Vparam(2) = 1/arma::as_scalar(arma::randg<arma::vec>(1,arma::distr_param(a,b)));
+    b = 2/(2*IGSR(2,1) + arma::sum(ss_diag.subvec(1+ncovs,P-1)/lambda)); // scale parameter
+    Vparam(2) = 1/arma::randg<double>(arma::distr_param(a,b));
   }
 }
 
@@ -291,7 +291,7 @@ List smesir_mcmc(const NumericMatrix Y,
     arma::vec Vparam(3); // initialize from prior distribution
     for(int i = 0; i != 3; ++i){
       if(vparam_key[i]){
-        Vparam(i) = 1/arma::as_scalar(arma::randg<arma::vec>(1,arma::distr_param(IGSR(i,0),IGSR(i,1))));
+        Vparam(i) = 1/arma::randg<double>(arma::distr_param(IGSR(i,0),1/IGSR(i,1))); // shape, scale parameterization
       }else{
         Vparam(i) = V0param(i);
       }

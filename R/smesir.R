@@ -31,14 +31,11 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
                    min_adaptation_cycles = 5, min_samps_per_cycle = NULL, 
                    tempering_ratio = 0.2, quiet = TRUE, sr_style = NULL, 
                    seed = NULL){
-  ## refer to the classic "lm" function docomentation for how this 
-  ## function should be elaborated
-  
   ## Unpack epi_params
-  N <- epi_params$region_populations
-  T_1 <- epi_params$outbreak_times
-  gamma <- epi_params$mean_removal_time
-  psi <- epi_params$incidence_probabilities
+  region_populations <- epi_params$region_populations
+  outbreak_times <- epi_params$outbreak_times
+  mean_removal_time <- epi_params$mean_removal_time
+  incidence_probabilities <- epi_params$incidence_probabilities
   
   ## Sanity check all arguments
   
@@ -76,7 +73,7 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   }
   # 3. Check that the prior is a list of the valid form  
   if(is.null(prior)){
-    prior <- list(ell = J/5, V0 = c(10,10,0.1), expected_initial_infected = 50.0, IGSR = matrix(c(rep(2,4),10,1), nrow = 3, ncol = 2, byrow = TRUE))
+    prior <- list(ell = J/5, V0 = c(10,10,0.1), expected_initial_infected = 50.0, IGSR = matrix(c(rep(c(2.01,0.101),2),3,0.2), nrow = 3, ncol = 2, byrow = TRUE))
   }else{
     if(K == 1){
       if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
@@ -156,14 +153,15 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
       response_matrix[,k] <- data[[response_name]][,k]
     }
   }
-  ncov <- ncol(design_mat) - 1
-  P <- ncol(design_matrices[[1]]) # number of "predictors"
+  
+  P <- ncol(design_matrices[[1]]) # number of "predictors" (including intercept and GP bases)
+  nterms <- P - r - 1 # not the same as the number of covariates (e.g., factor expansions)
   predictor_names <- colnames(design_matrices[[1]])
   vparam_names <- c("Variance(Intercept)", "Variance(Covariate Coeffs.)", "Variance(GP Random Effect)")
   names(design_matrices) <- region_names
   colnames(response_matrix) <- region_names
   if(!sr_style){
-    if(ncov == 0){
+    if(nterms == 0){
       V_used <- c(1,3)
     }else{
       V_used <- 1:3
@@ -188,7 +186,7 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   mcmc_diagnostics <- list()
   for(k in 1:K){
     # get them for Xi
-    mcmc_diagnostics[[k]] <- matrix(nrow = P, ncol = 2)
+    mcmc_diagnostics[[k]] <- matrix(nrow = P + 1, ncol = 2)
     for(p in 1:P){
       samples_matrix <- matrix(nrow = nstore, ncol = chains)
       for(chn in 1:chains){
@@ -197,7 +195,14 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
       }
       mcmc_diagnostics[[k]][p,] <- convergence_diagnostics(samples_matrix)
     }
-    rownames(mcmc_diagnostics[[k]]) <- predictor_names
+    # get them for II
+    samples_matrix <- matrix(nrow = nstore, ncol = chains)
+    for(chn in 1:chains){
+      samples_matrix[,chn] <- MCMC_Output[[chn]][["II"]][k,]
+    }
+    mcmc_diagnostics[[k]][P + 1,] <- convergence_diagnostics(samples_matrix)
+    
+    rownames(mcmc_diagnostics[[k]]) <- c(predictor_names,"II")
     colnames(mcmc_diagnostics[[k]]) <- c("Rhat", "ESS")
   }
   if(!sr_style){
@@ -233,7 +238,7 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
     names(mcmc_diagnostics)[1:K] <- region_names
     names(mcmc_diagnostics)[K + 1] <- "Global"
   }
-  print(mcmc_diagnostics)
+
   
   # Now extract and concatenate samples across chains
   if(K == 1){
@@ -319,19 +324,20 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   
   summary_stats <- list()
   if(K == 1){
-    summary_stats[[1]] = t(apply(samples$Xi, 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
+    summary_stats[[1]] = t(apply(samples$Xi[,1:(1+nterms)], 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
+    summary_stats[[1]] = rbind(summary_stats[[k]],II = t(apply(samples$II, 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975))))))
+    
   }else{
     for(k in 1:K){
-      summary_stats[[k]] = t(apply(samples$Xi[,,k], 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
+      summary_stats[[k]] = t(apply(samples$Xi[,1:(1+nterms),k], 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
+      summary_stats[[k]] = rbind(summary_stats[[k]],II = t(apply(matrix(samples$II[,k],ncol=1), 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975))))))
     }
   }
   if(!sr_style){
-    summary_stats[[K + 1]] = t(apply(samples$Xi0, 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
+    summary_stats[[K + 1]] = t(apply(samples$Xi0[,1:(1+nterms)], 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
     summary_stats[[K + 1]] = rbind(summary_stats[[K + 1]],t(apply(samples$V, 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975))))))
   }else{
-    for(k in 1:K){
-      summary_stats[[k]] = rbind(summary_stats[[k]],t(apply(samples$V, 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975))))))
-    }
+    summary_stats[[K + 1]] = t(apply(samples$V, 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
   }
   if(!sr_style){
     names(summary_stats) <- c(region_names,"Global")

@@ -9,6 +9,8 @@
 #' by the model fit in the antecedent "model_fit" call.
 #' @export
 smesir_forecast <- function(Jf, model_fit, new_x = NULL){
+  if(Jf < 1 || (Jf %% 1 != 0)) stop("Jf (forecast time horizon) must be an integer greater than 0.")
+  
   ## Unpack the model_fit object and preliminary tests
   prior <- model_fit[["prior"]]
   formula <- model_fit[["formula"]]
@@ -26,7 +28,7 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
   IGSR <- prior[["IGSR"]]
   
   K <- length(design_matrices)
-  J <- nrow(design_matrices[[1]])
+  Jo <- nrow(design_matrices[[1]])
   nsamps <- nrow(xi_samps)
   
   covariate_names <- all.vars(formula[[3]]) # this is really nice because it throws errors for one sided formulas
@@ -43,7 +45,7 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
   
   ## Create forecasting design matrices
   # Recreate GP covariance matrix from the model fit
-  S_fit <- exp(-as.matrix(dist(1:J, diag = TRUE, upper = TRUE)/ell)^2)
+  S_fit <- exp(-as.matrix(dist(1:Jo, diag = TRUE, upper = TRUE)/ell)^2)
   S_fit <- scale(S_fit, center = TRUE, scale = FALSE) # Project out the intercept
   kernel_decomp <- eigen(S_fit,symmetric = TRUE)
   rfit <- match(TRUE, cumsum(kernel_decomp$values)/sum(kernel_decomp$values) > .99)
@@ -51,14 +53,14 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
   lambda <- kernel_decomp$values[1:rfit]
   
   # Create GP covariance matrix for the complete model
-  Jt = J + Jf
+  Jt = Jo + Jf
   S <- exp(-as.matrix(dist(1:Jt, diag = TRUE, upper = TRUE)/ell)^2)
   S <- Re(scale(S, center = TRUE, scale = FALSE)) # Project out the intercept
   
   Li <- diag(1/lambda)
-  S_11 <- S[1:J,1:J]
-  S_12 <- S[(J + 1):Jt,1:J]
-  S_22 <- S[(J+1):Jt,(J+1):Jt]
+  S_11 <- S[1:Jo,1:Jo]
+  S_12 <- S[(Jo + 1):Jt,1:Jo]
+  S_22 <- S[(Jo+1):Jt,(Jo+1):Jt]
   
   mu_transform <- S_12%*%ebasis%*%Li
   conditional_cov <-  S_22 - S_12%*%ebasis%*%Li%*%t(ebasis)%*%t(S_12)
@@ -79,7 +81,7 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
     covariate_dframe <- as.data.frame(covariate_dframe)
     design_mat <- model.matrix(as.formula(paste("~", as.character(formula)[3])), covariate_dframe)
     if(length(covariate_names) == 0){
-      design_mat <- matrix(1, nrow = J, ncol = 1)
+      design_mat <- matrix(1, nrow = Jo, ncol = 1)
       colnames(design_mat) <- "(Intercept)"
     }
     design_matrices_forecast[[1]] <- cbind(design_mat,ebasis_forecasting)
@@ -92,23 +94,22 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
       covariate_dframe <- as.data.frame(covariate_dframe)
       design_mat <- model.matrix(as.formula(paste( "~", as.character(formula)[3])), covariate_dframe)
       if(length(covariate_names) == 0){
-        design_mat <- matrix(1, nrow = J, ncol = 1)
+        design_mat <- matrix(1, nrow = Jo, ncol = 1)
         colnames(design_mat) <- "(Intercept)"
       }
       design_matrices_forecast[[k]] <- cbind(design_mat,ebasis_forecasting) ## attach eigenbasis
     }
   }
-  vparam_names <- c("Variance(Intercept)", "Variance(Covariate Coeffs.)", "Variance(GP Random Effect)")
-
   P <- ncol(design_matrices[[1]]) # number of "predictors" (including intercept and GP bases)
   nterms <- P - rfit - 1 # not the same as the number of covariates (e.g., factor expansions)
-  predictor_names <- colnames(design_matrices[[1]][,1:nterms])
-
+  predictor_names <- colnames(design_matrices[[1]])
+  vparam_names <- c("Variance(Intercept)", "Variance(Covariate Coeffs.)", "Variance(GP Random Effect)")
+  
   
   ## Transform coefficient samples into forecast samples
   if(K == 1){
     forecast_beta <- array(dim = c(Jf,nsamps))
-    beta_samps <- array(dim = c(J + Jf, nsamps))    
+    beta_samps <- array(dim = c(Jo + Jf, nsamps))    
     
     forecast_expectations <- mu_transform %*% t(xi_samps[,(1+nterms+1):P])
     forecast_theta <- sapply(sigma2_samps, function(sigma2){rnorm(rf, sd = sqrt(sigma2*vscales_theta_forecasting))})
@@ -117,8 +118,8 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
     beta_samps <- rbind(design_matrices[[k]] %*% t(xi_samps),forecast_beta)
     beta_samps <- pmax(beta_samps,0)
     
-    event_samps <- array(dim = c(J + Jf, nsamps))
-    event_CI <- array(dim = c(J + Jf, 2))
+    event_samps <- array(dim = c(Jo + Jf, nsamps))
+    event_CI <- array(dim = c(Jo + Jf, 2))
     
     event_comp <- function(beta_samp,ii_samp){
       rpois(length(beta_samp), solve_events(solve_infections(beta_samp,
@@ -131,7 +132,7 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
     event_CI <- t(apply(event_samps,1,function(x) quantile(x, c(0.025,0.975))))
   }else{
     forecast_beta <- array(dim = c(Jf,nsamps,K))
-    beta_samps <- array(dim = c(J + Jf, nsamps,K))
+    beta_samps <- array(dim = c(Jo + Jf, nsamps,K))
     for(k in 1:K){
       forecast_expectations <- mu_transform %*% t(xi_samps[,(1+nterms+1):P,k])
       forecast_theta <- sapply(sigma2_samps, function(sigma2){rnorm(rf, sd = sqrt(sigma2*vscales_theta_forecasting))})
@@ -143,15 +144,14 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
       # plot_confint(t(apply(beta_samps[,,k],1,function(x) quantile(x,c(0.025,0.975)))),density=15,col = "blue")
     }
     
-    event_samps <- array(dim = c(J + Jf, nsamps,K))
-    event_CI <- array(dim = c(J + Jf, 2,K))
+    event_samps <- array(dim = c(Jo + Jf, nsamps,K))
+    event_CI <- array(dim = c(Jo + Jf, 2,K))
     for(k in 1:K){
       event_comp <- function(beta_samp,ii_samp){
         rpois(length(beta_samp), solve_events(solve_infections(beta_samp,
                                                               gamma, T_1[k],
                                                               ii_samp, N[k]),psi))
       }
-      print(paste(T_1[k],N[k],gamma))
       for(s in 1:nsamps){
         event_samps[,s,k] <- event_comp(beta_samps[,s,k],model_fit$samples$II[s,k])
       }
