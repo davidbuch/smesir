@@ -121,13 +121,13 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
     event_samps <- array(dim = c(Jo + Jf, nsamps))
     event_CI <- array(dim = c(Jo + Jf, 2))
     
-    event_comp <- function(beta_samp,ii_samp){
+    event_comp <- function(beta_samp,iip_samp){
       rpois(length(beta_samp), solve_events(solve_infections(beta_samp,
                                                             gamma, T_1[k],
-                                                            ii_samp, N[k]),psi))
+                                                            iip_samp, N[k]),psi))
     }
     for(s in 1:nsamps){
-      event_samps[,s] <- event_comp(beta_samps[,s],model_fit$samples$II[s])
+      event_samps[,s] <- event_comp(beta_samps[,s],model_fit$samples$IIP[s])
     }
     event_CI <- t(apply(event_samps,1,function(x) quantile(x, c(0.025,0.975))))
   }else{
@@ -147,13 +147,13 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
     event_samps <- array(dim = c(Jo + Jf, nsamps,K))
     event_CI <- array(dim = c(Jo + Jf, 2,K))
     for(k in 1:K){
-      event_comp <- function(beta_samp,ii_samp){
+      event_comp <- function(beta_samp,iip_samp){
         rpois(length(beta_samp), solve_events(solve_infections(beta_samp,
                                                               gamma, T_1[k],
-                                                              ii_samp, N[k]),psi))
+                                                              iip_samp, N[k]),psi))
       }
       for(s in 1:nsamps){
-        event_samps[,s,k] <- event_comp(beta_samps[,s,k],model_fit$samples$II[s,k])
+        event_samps[,s,k] <- event_comp(beta_samps[,s,k],model_fit$samples$IIP[s,k])
       }
       event_CI[,,k] <- t(apply(event_samps[,,k],1,function(x) quantile(x, c(0.025,0.975))))
     }

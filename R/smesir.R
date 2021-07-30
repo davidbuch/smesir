@@ -23,7 +23,7 @@
 #' \code{ell} - lengthscale of the squared exponential kernal for the temporal random effect
 #' \code{V0} - 3 variance hyperparameters for gaussian priors on the intercepts, coefficients, and temporal random effects;
 #' \code{IGSR} - 3 pairs of shape and rate hyperparameters for inverse-gamma priors;
-#' \code{expected_initial_infected} - the expected size of the infected population that appears at the beginning of the outbreak, used in an exponential prior; 
+#' \code{expected_initial_infected_population} - the expected size of the infected population that appears at the beginning of the outbreak, used in an exponential prior; 
 #' @param region_names Vector of names of the regions studied, listed in the same order in which they are indexed in the data
 #' @export
 smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
@@ -73,7 +73,7 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   }
   # 3. Check that the prior is a list of the valid form  
   if(is.null(prior)){
-    prior <- list(ell = J/5, V0 = c(10,10,0.1), expected_initial_infected = 50.0, IGSR = matrix(c(rep(c(2.01,0.101),2),3,0.2), nrow = 3, ncol = 2, byrow = TRUE))
+    prior <- list(ell = J/5, V0 = c(10,10,0.1), expected_initial_infected_population = 50.0, IGSR = matrix(c(rep(c(2.01,0.101),2),3,0.2), nrow = 3, ncol = 2, byrow = TRUE))
   }else{
     if(K == 1){
       if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
@@ -85,8 +85,8 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
       if(!is.numeric(prior[["IGSR"]]) || length(prior[["IGSR"]]) != 2 || any(prior[["IGSR"]] <= 0)){
         stop("prior[['IGSR']] must be a length 2 positive numeric vector (single-region style)")
       }
-      if(!is.numeric(prior[["expected_initial_infected"]]) || length(prior[["expected_initial_infected"]]) != 1 || prior[["expected_initial_infected"]] <= 0){
-        stop("prior[['expected_initial_infected']] must be a positive scalar")
+      if(!is.numeric(prior[["expected_initial_infected_population"]]) || length(prior[["expected_initial_infected_population"]]) != 1 || prior[["expected_initial_infected_population"]] <= 0){
+        stop("prior[['expected_initial_infected_population']] must be a positive scalar")
       }
       prior[["V0"]] <- c(prior[["V0"]],1) # last value placeholder
       prior[["IGSR"]] <- matrix(rep(prior[["IGSR"]],3), nrow = 3, ncol = 2,  byrow = TRUE)
@@ -100,15 +100,15 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
       if(!is.numeric(prior[["IGSR"]]) || dim(prior[["IGSR"]]) != c(3,2) || any(prior[["IGSR"]] <= 0)){
         stop("prior[['IGSR']] must be a 3x2 positive numeric matrix")
       }
-      if(!is.numeric(prior[["expected_initial_infected"]]) || length(prior[["expected_initial_infected"]]) != 1 || prior[["expected_initial_infected"]] <= 0){
-        stop("prior[['expected_initial_infected']] must be a positive scalar")
+      if(!is.numeric(prior[["expected_initial_infected_population"]]) || length(prior[["expected_initial_infected_population"]]) != 1 || prior[["expected_initial_infected_population"]] <= 0){
+        stop("prior[['expected_initial_infected_population']] must be a positive scalar")
       }
     }
   }
   ell <- prior[["ell"]]
   V0 <- prior[["V0"]]
   IGSR <- prior[["IGSR"]]
-  expected_initial_infected <- prior[["expected_initial_infected"]]
+  expected_initial_infected_population <- prior[["expected_initial_infected_population"]]
   
   ## We will need the eigendecomposition of the scaled GP covariance matrix
   ## when we construct our design matrix
@@ -153,7 +153,9 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
       response_matrix[,k] <- data[[response_name]][,k]
     }
   }
-  
+  if(anyNA(response_matrix) || anyNA(design_matrices, recursive = TRUE)){
+    stop("Function 'smesir' is not currently set up to handle data with missing values.")
+  }
   P <- ncol(design_matrices[[1]]) # number of "predictors" (including intercept and GP bases)
   nterms <- P - r - 1 # not the same as the number of covariates (e.g., factor expansions)
   predictor_names <- colnames(design_matrices[[1]])
@@ -178,7 +180,7 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   if(is.null(min_samps_per_cycle)){
     min_samps_per_cycle <- 10*P*P # this should be pretty large since samples are autocorrelated
   }
-  MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected,
+  MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population,
                              region_populations, incidence_probabilities, tempering_ratio, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
   
   ## do convergence diagnostics here
@@ -195,14 +197,14 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
       }
       mcmc_diagnostics[[k]][p,] <- convergence_diagnostics(samples_matrix)
     }
-    # get them for II
+    # get them for IIP
     samples_matrix <- matrix(nrow = nstore, ncol = chains)
     for(chn in 1:chains){
-      samples_matrix[,chn] <- MCMC_Output[[chn]][["II"]][k,]
+      samples_matrix[,chn] <- MCMC_Output[[chn]][["IIP"]][k,]
     }
     mcmc_diagnostics[[k]][P + 1,] <- convergence_diagnostics(samples_matrix)
     
-    rownames(mcmc_diagnostics[[k]]) <- c(predictor_names,"II")
+    rownames(mcmc_diagnostics[[k]]) <- c(predictor_names,"IIP")
     colnames(mcmc_diagnostics[[k]]) <- c("Rhat", "ESS")
   }
   if(!sr_style){
@@ -278,14 +280,14 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   }
 
   for(chn in 1:chains){
-    II <- matrix(nrow = chains*nstore, ncol = K)
+    IIP <- matrix(nrow = chains*nstore, ncol = K)
     for(chn in 1:chains){
       start_idx_destination <- nstore*(chn-1) + 1
       end_idx_destination <- nstore*(chn)
-      II[start_idx_destination:end_idx_destination,] <- t(MCMC_Output[[chn]][["II"]])
+      IIP[start_idx_destination:end_idx_destination,] <- t(MCMC_Output[[chn]][["IIP"]])
     }
   }
-  colnames(II) <- region_names
+  colnames(IIP) <- rep("IIP",K)
   
   # extract Vparams
   if(!sr_style){
@@ -314,38 +316,40 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   if(!sr_style){
     samples[["Xi"]] <- Xi
     samples[["Xi0"]] <- Xi0
-    samples[["II"]] <- II
+    samples[["IIP"]] <- IIP
     samples[["V"]] <- V
   }else{
     samples[["Xi"]] <- Xi
-    samples[["II"]] <- II
+    samples[["IIP"]] <- IIP
     samples[["V"]] <- V
   }
   
+  # define a summarization function
+  fournum <- function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))
   summary_stats <- list()
   if(K == 1){
-    summary_stats[[1]] = t(apply(samples$Xi[,1:(1+nterms)], 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
-    summary_stats[[1]] = rbind(summary_stats[[k]],II = t(apply(samples$II, 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975))))))
-    
+    summary_stats[[1]] = rbind(t(apply(samples$Xi[,1:(1+nterms)], 2, fournum)),
+                               IIP = fournum(samples$IIP))
   }else{
     for(k in 1:K){
-      summary_stats[[k]] = t(apply(samples$Xi[,1:(1+nterms),k], 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
-      summary_stats[[k]] = rbind(summary_stats[[k]],II = t(apply(matrix(samples$II[,k],ncol=1), 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975))))))
+      summary_stats[[k]] = rbind(t(apply(samples$Xi[,1:(1+nterms),k], 2, fournum)),
+                                 IIP = fournum(samples$IIP[,k]))
     }
   }
   if(!sr_style){
-    summary_stats[[K + 1]] = t(apply(samples$Xi0[,1:(1+nterms)], 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
-    summary_stats[[K + 1]] = rbind(summary_stats[[K + 1]],t(apply(samples$V, 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975))))))
+    summary_stats[[K + 1]] = t(apply(samples$Xi0[,1:(1+nterms)], 2, fournum))
+    summary_stats[[K + 1]] = rbind(summary_stats[[K + 1]],t(apply(samples$V, 2, fournum)))
   }else{
-    summary_stats[[K + 1]] = t(apply(samples$V, 2, function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))))
+    summary_stats[[K + 1]] = t(apply(samples$V, 2, fournum))
   }
   if(!sr_style){
     names(summary_stats) <- c(region_names,"Global")
   }else{
     names(summary_stats) <- region_names
   }
-  print(summary_stats)
-  
+  if(!quiet){
+    print(summary_stats)
+  }
   # Construct a return object using 
   # - summary stats for each parameter
   # - rhat and ESS diagnostics for each parameter
