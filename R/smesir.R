@@ -173,7 +173,7 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   # matrix, whether or not K > 1. Similarly, pass XI as a matrix
   # and the Design_Matrices as a list (which is how I've already
   # constructed 'design_matrices' fortunately)
-  set.seed(seed)
+  if(!is.null(seed)) set.seed(seed)
   if(!quiet){
     print("Reached the Sampling Function")
   }
@@ -241,7 +241,7 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
     names(mcmc_diagnostics)[K + 1] <- "Global"
   }
 
-  
+
   # Now extract and concatenate samples across chains
   if(K == 1){
     Xi <- matrix(nrow = chains*nstore, ncol = P)
@@ -328,24 +328,27 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   fournum <- function(x) c(mean = mean(x), sd = sd(x), quantile(x,c(0.025,0.975)))
   summary_stats <- list()
   if(K == 1){
-    summary_stats[[1]] = rbind(t(apply(samples$Xi[,1:(1+nterms)], 2, fournum)),
-                               IIP = fournum(samples$IIP))
+    summary_stats[[1]] <- rbind(t(apply(matrix(samples$Xi[,1:(1+nterms)],ncol = 1+nterms), 2, fournum)),
+                               fournum(samples$IIP))
+    rownames(summary_stats[[1]]) <- c(predictor_names[1:(1+nterms)],"IIP")
   }else{
     for(k in 1:K){
-      summary_stats[[k]] = rbind(t(apply(samples$Xi[,1:(1+nterms),k], 2, fournum)),
-                                 IIP = fournum(samples$IIP[,k]))
+      summary_stats[[k]] <- rbind(t(apply(matrix(samples$Xi[,1:(1+nterms),k],ncol=1+nterms), 2, fournum)),
+                                 fournum(samples$IIP[,k]))
+      rownames(summary_stats[[k]]) <- c(predictor_names[1:(1+nterms)],"IIP")
     }
   }
   if(!sr_style){
-    summary_stats[[K + 1]] = t(apply(samples$Xi0[,1:(1+nterms)], 2, fournum))
-    summary_stats[[K + 1]] = rbind(summary_stats[[K + 1]],t(apply(samples$V, 2, fournum)))
+    summary_stats[[K + 1]] <- t(apply(matrix(samples$Xi0[,1:(1+nterms)],ncol=1+nterms), 2, fournum))
+    rownames(summary_stats[[K + 1]]) <- predictor_names[1:(1+nterms)]
+    summary_stats[[K + 1]] <- rbind(summary_stats[[K + 1]],t(apply(samples$V, 2, fournum)))
   }else{
-    summary_stats[[K + 1]] = t(apply(samples$V, 2, fournum))
+    summary_stats[[K + 1]] <- t(apply(samples$V, 2, fournum))
   }
   if(!sr_style){
     names(summary_stats) <- c(region_names,"Global")
   }else{
-    names(summary_stats) <- region_names
+    names(summary_stats) <- c(region_names,"Global")
   }
   if(!quiet){
     print(summary_stats)
@@ -365,7 +368,9 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
                  prior = prior,
                  formula = formula,
                  sr_style = sr_style,
+                 response_matrix = response_matrix,
                  design_matrices = design_matrices,
-                 epi_params = epi_params)
+                 epi_params = epi_params,
+                 region_names = region_names)
   return(output)
 }

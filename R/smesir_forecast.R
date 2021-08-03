@@ -81,7 +81,7 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
     covariate_dframe <- as.data.frame(covariate_dframe)
     design_mat <- model.matrix(as.formula(paste("~", as.character(formula)[3])), covariate_dframe)
     if(length(covariate_names) == 0){
-      design_mat <- matrix(1, nrow = Jo, ncol = 1)
+      design_mat <- matrix(1, nrow = Jf, ncol = 1)
       colnames(design_mat) <- "(Intercept)"
     }
     design_matrices_forecast[[1]] <- cbind(design_mat,ebasis_forecasting)
@@ -94,7 +94,7 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
       covariate_dframe <- as.data.frame(covariate_dframe)
       design_mat <- model.matrix(as.formula(paste( "~", as.character(formula)[3])), covariate_dframe)
       if(length(covariate_names) == 0){
-        design_mat <- matrix(1, nrow = Jo, ncol = 1)
+        design_mat <- matrix(1, nrow = Jf, ncol = 1)
         colnames(design_mat) <- "(Intercept)"
       }
       design_matrices_forecast[[k]] <- cbind(design_mat,ebasis_forecasting) ## attach eigenbasis
@@ -114,8 +114,8 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
     forecast_expectations <- mu_transform %*% t(xi_samps[,(1+nterms+1):P])
     forecast_theta <- sapply(sigma2_samps, function(sigma2){rnorm(rf, sd = sqrt(sigma2*vscales_theta_forecasting))})
     forecast_noise <- ebasis_forecasting%*%forecast_theta
-    forecast_beta <- forecast_expectations + forecast_noise + as.matrix(design_matrices_forecast[[k]][,1:(1+nterms)])%*%t(xi_samps[,1:(1+nterms)])
-    beta_samps <- rbind(design_matrices[[k]] %*% t(xi_samps),forecast_beta)
+    forecast_beta <- forecast_expectations + forecast_noise + as.matrix(design_matrices_forecast[[1]][,1:(1+nterms)])%*%t(xi_samps[,1:(1+nterms)])
+    beta_samps <- rbind(design_matrices[[1]] %*% t(xi_samps),forecast_beta)
     beta_samps <- pmax(beta_samps,0)
     
     event_samps <- array(dim = c(Jo + Jf, nsamps))
@@ -123,8 +123,8 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
     
     event_comp <- function(beta_samp,iip_samp){
       rpois(length(beta_samp), solve_events(solve_infections(beta_samp,
-                                                            gamma, T_1[k],
-                                                            iip_samp, N[k]),psi))
+                                                            gamma, T_1,
+                                                            iip_samp, N),psi))
     }
     for(s in 1:nsamps){
       event_samps[,s] <- event_comp(beta_samps[,s],model_fit$samples$IIP[s])

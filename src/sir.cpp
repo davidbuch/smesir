@@ -80,6 +80,7 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
                      const double gamma, // inverse average infectious period
                      const int T_1, // region's outbreak index
                      const double IIP, // region's initial infectious population
+                     const double expected_iip,
                      const int N, // region population
                      const NumericVector psi // interval event probability
 ){
@@ -91,46 +92,17 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   }
   
   double res = 0;
-  // add log prior contribution
+  // add log prior contribution (Xi)
   arma::mat X(Xi - Xi0);
   res += -0.5 * arma::as_scalar( arma::dot(((X*(X.t())).eval()).diag(), 1/V) );
+  
+  // add log prior contribution (IIP)
+  res += -IIP/expected_iip;
   
   // add log likelihood contribution
   res += log_poisd(Y,solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1,IIP,N),psi));
 
   return(res);
-}
-
-void update_iip(const arma::mat & Xi,      // PxK matrix of local parameters
-               const NumericMatrix Y, // auto pass by reference, I believe
-               const List Design_Matrices,  // List of K design matrices
-               const double gamma, // inverse infectious period
-               const IntegerVector T_1, // outbreak indices 
-               arma::vec & IIP, // initial impulses of infection
-               const IntegerVector N, // region populations
-               const NumericVector psi, // interval event probability
-               const double expected_iip,
-               const arma::vec & proposal_sd,
-               const double tempering_factor
-               )
-{
-  const int K = Y.ncol();
-  
-  for(int k = 0; k != K; ++k){
-    arma::mat dmat = Design_Matrices[k];
-    arma::vec B = dmat * Xi.col(k);
-    
-    double prop = IIP[k] + R::rnorm(0,proposal_sd[k]);
-    prop = (prop > 0 ? prop : -prop); // reflect at 0
-    double ac_prob = std::exp(
-      - (prop - IIP[k])/expected_iip + // log prior ratio plus log likelihood ratio
-      tempering_factor * (log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1[k],prop,N[k]),psi)) - 
-        log_poisd(Y(_,k),solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1[k],IIP[k],N[k]),psi))));
-    
-    if(R::runif(0,1) < ac_prob){
-      IIP[k] = prop;
-    }
-  }
 }
 
 void update_xi0(arma::mat const & Xi,
@@ -277,10 +249,17 @@ List smesir_mcmc(const NumericMatrix Y,
 
     // initialize initial impulse
     arma::vec iip_proposal_sd(K,arma::fill::ones); // we will adapt this based on sample variance later
-    arma::vec IIP(K);
+    arma::rowvec IIP(K);
     for(int k = 0; k != K; ++k){
       IIP[k] = R::rgamma(1,expected_iip); // randomly initialize IIP ~ exp(1/expected_iip)
     }
+    double log_IIPk = 0; // initial value doesn't matter
+    double log_IIPk_prop = 0; // initial value doesn't matter
+    
+    //arma::mat IIP_mat(IIP.as_row());
+    arma::mat Xi_and_log_IIP = arma::join_cols(Xi,arma::log(IIP));
+    arma::vec Xik_and_log_IIPk_prop(P+1);
+    
     
     if(!quiet){
       Rcout << "\n...done!\n";
@@ -311,18 +290,13 @@ List smesir_mcmc(const NumericMatrix Y,
     /* Adaptation Phase */
     
     // prep to adapt Xi proposal covariance
-    arma::vec C0diag(P,arma::fill::ones);
-    C0diag.subvec(1+ncovs,P - 1) = lambda/10; C0diag = (0.1/P)*C0diag;
+    arma::vec C0diag(P+1,arma::fill::ones);
+    C0diag.subvec(1+ncovs,P - 1) = lambda/10;
     arma::mat C0 = arma::diagmat(C0diag);
-    arma::cube R(P,P,K);
+    arma::cube R(P+1,P+1,K);
     for(int k = 0; k != K; ++k){
       R.slice(k) = arma::chol(C0);
-    }
-    
-    // prep to adapt IIP proposal variances
-    arma::vec iip_current_mean(K,arma::fill::ones);
-    arma::vec iip_current_var(K,arma::fill::ones);
-    int iip_samp_count = 0;
+   }
     
     // arguments tempering_ratio, ncycles, samps per cycle, quiet
     IntegerVector xi_samp_counts(K,0);
@@ -332,53 +306,43 @@ List smesir_mcmc(const NumericMatrix Y,
     double tempering_factor = (double) completed_cycle_count/ncycles;
     bool adapting = true;
     int it = 0; // within-cycle iteration count
-    arma::cube ap_Xi(samps_per_cycle,P,K);
+    arma::cube ap_Xi_and_log_IIP(samps_per_cycle,P + 1,K);
     while(adapting){
       it += 1; // update iteration number
       if((it % 1000) == 0){checkUserInterrupt();}
       for(int k = 0; k != K; ++k){
         if(xi_samp_counts[k] < samps_per_cycle){
-          Xik = Xi.col(k);
-          Xik_prop = Xik + arma::trans(R.slice(k)) * arma::randn(P);
-          double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),IIP(k),N(k),psi) - 
-            log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),IIP(k),N(k),psi);
+          Xik_and_log_IIPk_prop = Xi_and_log_IIP.col(k) + arma::trans(R.slice(k)) * arma::randn(P + 1);
+          Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P];
+          Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k);
+          double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,N(k),psi) - 
+            log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,N(k),psi);
           if(R::runif(0,1) < std::exp(log_acc_prob)){
-            Xi.col(k) = Xik_prop;
-            ap_Xi(xi_samp_counts[k],0,k,arma::size(1,P,1)) = Xik_prop;
+            Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
+            ap_Xi_and_log_IIP(xi_samp_counts[k],0,k,arma::size(1,P+1,1)) = Xik_and_log_IIPk_prop;
             xi_samp_counts[k] += 1;
             xi_samps_since_last_accepted[k] = 0;
             acc_rates[k] = (1 + (it - 1)*acc_rates[k])/it;
           }else{
             if(completed_cycle_count > ncycles){ // stop being greedy
-              ap_Xi(xi_samp_counts[k],0,k,arma::size(1,P,1)) = Xi.col(k);
+              ap_Xi_and_log_IIP(xi_samp_counts[k],0,k,arma::size(1,P+1,1)) = Xi_and_log_IIP.col(k);
               xi_samp_counts[k] += 1;
             }
             xi_samps_since_last_accepted[k] += 1;
             acc_rates[k] = (0 + (it - 1)*acc_rates[k])/it;
           }
-          if(xi_samps_since_last_accepted[k] > 100){
+          if(completed_cycle_count < ncycles && xi_samps_since_last_accepted[k] > 100){
             R.slice(k) = R.slice(k)/3.16; // divide proposal covariance by 10
             xi_samps_since_last_accepted[k] = 0;
           }
         }
       }
+      Xi = Xi_and_log_IIP.rows(0,P - 1);
+      IIP = arma::exp(Xi_and_log_IIP.row(P));
       
       // global params with gibbs proposals
       if(!sr_style){
         update_xi0(Xi,Xi0,V,V0); // modifies Xi0 in place
-      }
-      
-      // update IIP
-      update_iip(Xi,Y,Design_Matrices,gamma,T_1,IIP,N,psi,
-                expected_iip,iip_proposal_sd,tempering_factor);
-      // update IIP proposal standard deviation
-      iip_samp_count += 1;
-      for(int k = 0; k != K; ++k){ 
-        iip_current_var[k] = ((iip_samp_count - 1)*iip_current_var[k]/iip_samp_count) + 
-          iip_current_mean[k]*iip_current_mean[k] + IIP[k]*IIP[k]/iip_samp_count; // partially update var
-        iip_current_mean[k] = (iip_samp_count*iip_current_mean[k] + IIP[k])/(iip_samp_count + 1); // update mean
-        iip_current_var[k] -= (iip_samp_count + 1)*iip_current_mean[k]*iip_current_mean[k]/iip_samp_count; // finish updating var
-        iip_proposal_sd[k] = 2.4*std::sqrt(iip_current_var[k]);
       }
       
       // update variance parameters
@@ -391,19 +355,19 @@ List smesir_mcmc(const NumericMatrix Y,
         completed_cycle_count += 1;
         
         // do we need to keep adapting? (are we short on cycles, or are acc_rates unacceptable)
-        adapting = (completed_cycle_count < ncycles) || is_true(any(acc_rates < 0.1)) || is_true(any(acc_rates > 0.4));
+        adapting = ((completed_cycle_count < ncycles) || is_true(any(acc_rates < 0.3)) || is_true(any(acc_rates > 0.4))) && (completed_cycle_count < ncycles + 10);
         
         // compute new Xi proposal covariances
         for(int k = 0; k!= K; ++k){
           // magic number comes from 2.38^2, see article Haario et al (2001)
           if(completed_cycle_count < ncycles){
-            R.slice(k) = arma::chol(5.66*arma::cov(ap_Xi.slice(k))/P);
+            R.slice(k) = arma::chol(5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 1));
           }else{ // after ncycle, begin retaining covariance information across cycles
             int extra_cycle_count = completed_cycle_count - (ncycles - 1);
             arma::mat oldSigHat = arma::trans(R.slice(k)) * R.slice(k);
-            arma::mat newSigHat = 5.66*arma::cov(ap_Xi.slice(k))/P;
-            arma::mat meanSigHat = ((extra_cycle_count*samps_per_cycle - P)*oldSigHat + 
-              (samps_per_cycle - P)*newSigHat)/((extra_cycle_count+1)*samps_per_cycle - P);
+            arma::mat newSigHat = 5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 1);
+            arma::mat meanSigHat = ((extra_cycle_count*samps_per_cycle - (P + 1))*oldSigHat + 
+              (samps_per_cycle - (P + 1))*newSigHat)/((extra_cycle_count+1)*samps_per_cycle - (P + 1));
             R.slice(k) = arma::chol(meanSigHat);
           }
         }
@@ -449,23 +413,22 @@ List smesir_mcmc(const NumericMatrix Y,
       }
       // update local params
       for(int k = 0; k != K; ++k){
-        Xik = Xi.col(k);
-        Xik_prop = Xik + arma::trans(R.slice(k)) * arma::randn(P);
-        double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),IIP(k),N(k),psi) - 
-          log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),IIP(k),N(k),psi);
+        Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k);
+        Xik_and_log_IIPk_prop = Xi_and_log_IIP.col(k) + arma::trans(R.slice(k)) * arma::randn(P + 1);
+        Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P];
+        double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop), expected_iip,N(k),psi) - 
+          log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk), expected_iip,N(k),psi);
         if(R::runif(0,1) < std::exp(log_acc_prob)){
-          Xi.col(k) = Xik_prop;
+          Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
         }
       }
+      Xi = Xi_and_log_IIP.rows(0,P - 1);
+      IIP = arma::exp(Xi_and_log_IIP.row(P));
       
       // global params with gibbs proposals
       if(!sr_style){
         update_xi0(Xi,Xi0,V,V0); // modifies Xi0 in place
       }
-      
-      // update IIP
-      update_iip(Xi,Y,Design_Matrices,gamma,T_1,IIP,N,psi,
-                expected_iip,iip_proposal_sd,1.0);
       
       update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
@@ -474,7 +437,7 @@ List smesir_mcmc(const NumericMatrix Y,
         int s = (it - warmup)/thin;
         chain_Xi.col(s) = Xi.as_col();
         chain_Xi0.col(s) = Xi0;
-        chain_IIP.col(s) = IIP;
+        chain_IIP.col(s) = IIP.as_col();
         chain_V.col(s) = Vparam;
       }
     }
