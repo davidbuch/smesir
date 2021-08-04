@@ -87,8 +87,8 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   arma::vec B = dmat * Xi;
   // check if parameters are within prior support first
   bool B_out_of_bounds = arma::any(arma::vectorise(B) < 0);
-  if(B_out_of_bounds){
-    return(std::log(0));
+  if(B_out_of_bounds || IIP > N){ // B or IIP out of bounds?
+    return(std::log(0)); // likelihood = 0
   }
   
   double res = 0;
@@ -98,7 +98,7 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   
   // add log prior contribution (IIP)
   res += -IIP/expected_iip;
-  
+
   // add log likelihood contribution
   res += log_poisd(Y,solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1,IIP,N),psi));
 
@@ -188,7 +188,6 @@ List smesir_mcmc(const NumericMatrix Y,
                  const double expected_iip, // expected infectious population
                  const IntegerVector N, // region populations
                  const NumericVector psi, // interval event probability
-                 const double tempering_ratio,
                  const int ncycles,
                  const int samps_per_cycle,
                  const int nchain, 
@@ -298,7 +297,7 @@ List smesir_mcmc(const NumericMatrix Y,
       R.slice(k) = arma::chol(C0);
    }
     
-    // arguments tempering_ratio, ncycles, samps per cycle, quiet
+    // arguments ncycles, samps per cycle, quiet
     IntegerVector xi_samp_counts(K,0);
     IntegerVector xi_samps_since_last_accepted(K,0);
     NumericVector acc_rates(K,0.0);
@@ -311,12 +310,16 @@ List smesir_mcmc(const NumericMatrix Y,
       it += 1; // update iteration number
       if((it % 1000) == 0){checkUserInterrupt();}
       for(int k = 0; k != K; ++k){
+        //Rcout << "Region" << k << "\n";
         if(xi_samp_counts[k] < samps_per_cycle){
           Xik_and_log_IIPk_prop = Xi_and_log_IIP.col(k) + arma::trans(R.slice(k)) * arma::randn(P + 1);
           Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P];
           Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k);
+          //Rcout << "Made proposal " << Xik_and_log_IIPk_prop << "\n";
+          //Rcout << "Current value " << Xi_and_log_IIP.col(k) << "\n";
           double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,N(k),psi) - 
             log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,N(k),psi);
+          //Rcout << "Accepting with prob: " << log_acc_prob << "\n";
           if(R::runif(0,1) < std::exp(log_acc_prob)){
             Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
             ap_Xi_and_log_IIP(xi_samp_counts[k],0,k,arma::size(1,P+1,1)) = Xik_and_log_IIPk_prop;
@@ -339,16 +342,16 @@ List smesir_mcmc(const NumericMatrix Y,
       }
       Xi = Xi_and_log_IIP.rows(0,P - 1);
       IIP = arma::exp(Xi_and_log_IIP.row(P));
-      
+      //Rcout << "Finished XI update \n";
       // global params with gibbs proposals
       if(!sr_style){
         update_xi0(Xi,Xi0,V,V0); // modifies Xi0 in place
       }
-      
+      //Rcout << "Finished XI0 update \n";
       // update variance parameters
       update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
-
+      //Rcout << "Finished  V update \n";
       // is the adaptation cycle complete?
       if(is_true(all(xi_samp_counts == samps_per_cycle))){
         // increment the completed cycle count

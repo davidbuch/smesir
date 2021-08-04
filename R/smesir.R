@@ -180,8 +180,25 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   if(is.null(min_samps_per_cycle)){
     min_samps_per_cycle <- 10*P*P # this should be pretty large since samples are autocorrelated
   }
+  # print(vscales_theta)
+  # print(V0)
+  # print(IGSR)
+  # print(1/mean_removal_time)
+  # print(outbreak_times)
+  # print(expected_initial_infected_population)
+  # print(region_populations)
+  # print(incidence_probabilities)
+  # print(min_adaptation_cycles)
+  # print(min_samps_per_cycle)
+  # print(chains)
+  # print(iter)
+  # print(warmup)
+  # print(thin)
+  # print(sr_style)
+  # print(quiet)
+  # return(list(response_matrix,design_matrices))
   MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population,
-                             region_populations, incidence_probabilities, tempering_ratio, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
+                             region_populations, incidence_probabilities, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
   
   ## do convergence diagnostics here
   nstore <- floor((iter - warmup)/thin)
