@@ -71,40 +71,48 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   if(!check2){
     stop("All elements of argument 'data' must be numeric matrices of equal size.")
   }
-  # 3. Check that the prior is a list of the valid form  
-  if(is.null(prior)){
-    prior <- list(ell = J/5, V0 = c(10,10,0.1), expected_initial_infected_population = 50.0, IGSR = matrix(c(rep(c(2.01,0.101),2),3,0.2), nrow = 3, ncol = 2, byrow = TRUE))
+  # 3. Check that the prior is a list of the valid form 
+  if(K == 1){
+    if(is.null(prior[["ell"]])) prior[["ell"]] <- J/5
+    if(is.null(prior[["V0"]])) prior[["V0"]] <- c(10,10)
+    if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- J/5
+    if(is.null(prior[["IGSR"]])) prior[["IGSR"]] <- c(3,0.2)
+    
+    if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
+      stop("prior[['ell']] must be a positive scalar")
+    }
+    if(!is.numeric(prior[["V0"]]) || length(prior[["V0"]]) != 2 || any(prior[["ell"]] <= 0)){
+      stop("prior[['V0']] must be a length 2 positive numeric vector (single-region style)")
+    }
+    if(!is.numeric(prior[["expected_initial_infected_population"]]) || length(prior[["expected_initial_infected_population"]]) != 1 || prior[["expected_initial_infected_population"]] <= 0){
+      stop("prior[['expected_initial_infected_population']] must be a positive scalar")
+    }
+    if(!is.numeric(prior[["IGSR"]]) || length(prior[["IGSR"]]) != 2 || any(prior[["IGSR"]] <= 0)){
+      stop("prior[['IGSR']] must be a length 2 positive numeric vector (single-region style)")
+    }
+
+    prior[["V0"]] <- c(prior[["V0"]],1) # last value placeholder
+    prior[["IGSR"]] <- matrix(rep(prior[["IGSR"]],3), nrow = 3, ncol = 2,  byrow = TRUE)
   }else{
-    if(K == 1){
-      if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
-        stop("prior[['ell']] must be a positive scalar")
-      }
-      if(!is.numeric(prior[["V0"]]) || length(prior[["V0"]]) != 2 || any(prior[["ell"]] <= 0)){
-        stop("prior[['V0']] must be a length 2 positive numeric vector (single-region style)")
-      }
-      if(!is.numeric(prior[["IGSR"]]) || length(prior[["IGSR"]]) != 2 || any(prior[["IGSR"]] <= 0)){
-        stop("prior[['IGSR']] must be a length 2 positive numeric vector (single-region style)")
-      }
-      if(!is.numeric(prior[["expected_initial_infected_population"]]) || length(prior[["expected_initial_infected_population"]]) != 1 || prior[["expected_initial_infected_population"]] <= 0){
-        stop("prior[['expected_initial_infected_population']] must be a positive scalar")
-      }
-      prior[["V0"]] <- c(prior[["V0"]],1) # last value placeholder
-      prior[["IGSR"]] <- matrix(rep(prior[["IGSR"]],3), nrow = 3, ncol = 2,  byrow = TRUE)
-    }else{
-      if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
-        stop("prior[['ell']] must be a positive scalar")
-      }
-      if(!is.numeric(prior[["V0"]]) || length(prior[["V0"]]) != 3 || any(prior[["ell"]] <= 0)){
-        stop("prior[['V0']] must be a length 3 positive numeric vector")
-      }
-      if(!is.numeric(prior[["IGSR"]]) || dim(prior[["IGSR"]]) != c(3,2) || any(prior[["IGSR"]] <= 0)){
-        stop("prior[['IGSR']] must be a 3x2 positive numeric matrix")
-      }
-      if(!is.numeric(prior[["expected_initial_infected_population"]]) || length(prior[["expected_initial_infected_population"]]) != 1 || prior[["expected_initial_infected_population"]] <= 0){
-        stop("prior[['expected_initial_infected_population']] must be a positive scalar")
-      }
+    if(is.null(prior[["ell"]])) prior[["ell"]] <- J/5
+    if(is.null(prior[["V0"]])) prior[["V0"]] <- c(10,10,0.1)
+    if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- J/5
+    if(is.null(prior[["IGSR"]])) prior[["IGSR"]] <- matrix(c(rep(c(2.01,0.101),2),3,0.2), nrow = 3, ncol = 2, byrow = TRUE)
+    
+    if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
+      stop("prior[['ell']] must be a positive scalar")
+    }
+    if(!is.numeric(prior[["V0"]]) || length(prior[["V0"]]) != 3 || any(prior[["ell"]] <= 0)){
+      stop("prior[['V0']] must be a length 3 positive numeric vector")
+    }
+    if(!is.numeric(prior[["expected_initial_infected_population"]]) || length(prior[["expected_initial_infected_population"]]) != 1 || prior[["expected_initial_infected_population"]] <= 0){
+      stop("prior[['expected_initial_infected_population']] must be a positive scalar")
+    }
+    if(!is.numeric(prior[["IGSR"]]) || dim(prior[["IGSR"]]) != c(3,2) || any(prior[["IGSR"]] <= 0)){
+      stop("prior[['IGSR']] must be a 3x2 positive numeric matrix")
     }
   }
+
   ell <- prior[["ell"]]
   V0 <- prior[["V0"]]
   IGSR <- prior[["IGSR"]]
@@ -148,6 +156,8 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
         design_mat <- matrix(1, nrow = J, ncol = 1)
         colnames(design_mat) <- "(Intercept)"
       }
+
+      
       design_matrices[[k]] <- cbind(design_mat,ebasis) ## attach eigenbasis
       #design_matrices[[k]] <- design_mat
       response_matrix[,k] <- data[[response_name]][,k]
@@ -180,23 +190,7 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   if(is.null(min_samps_per_cycle)){
     min_samps_per_cycle <- 10*P*P # this should be pretty large since samples are autocorrelated
   }
-  # print(vscales_theta)
-  # print(V0)
-  # print(IGSR)
-  # print(1/mean_removal_time)
-  # print(outbreak_times)
-  # print(expected_initial_infected_population)
-  # print(region_populations)
-  # print(incidence_probabilities)
-  # print(min_adaptation_cycles)
-  # print(min_samps_per_cycle)
-  # print(chains)
-  # print(iter)
-  # print(warmup)
-  # print(thin)
-  # print(sr_style)
-  # print(quiet)
-  # return(list(response_matrix,design_matrices))
+
   MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population,
                              region_populations, incidence_probabilities, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
   

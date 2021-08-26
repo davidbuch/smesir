@@ -6,18 +6,23 @@
 
 using namespace Rcpp;
 
+#ifdef RCPP_USE_GLOBAL_ROSTREAM
+Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
+Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
+#endif
+
 // solve_infections
-NumericVector solve_infections(const NumericVector beta, const double gamma, const int T_1, const double II, const int N);
-RcppExport SEXP _smesir_solve_infections(SEXP betaSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP IISEXP, SEXP NSEXP) {
+NumericVector solve_infections(const NumericVector beta, const double gamma, const int T_1, const double IIP, const int N);
+RcppExport SEXP _smesir_solve_infections(SEXP betaSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP IIPSEXP, SEXP NSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< const NumericVector >::type beta(betaSEXP);
     Rcpp::traits::input_parameter< const double >::type gamma(gammaSEXP);
     Rcpp::traits::input_parameter< const int >::type T_1(T_1SEXP);
-    Rcpp::traits::input_parameter< const double >::type II(IISEXP);
+    Rcpp::traits::input_parameter< const double >::type IIP(IIPSEXP);
     Rcpp::traits::input_parameter< const int >::type N(NSEXP);
-    rcpp_result_gen = Rcpp::wrap(solve_infections(beta, gamma, T_1, II, N));
+    rcpp_result_gen = Rcpp::wrap(solve_infections(beta, gamma, T_1, IIP, N));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -34,8 +39,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // smesir_mcmc
-List smesir_mcmc(const NumericMatrix Y, const List Design_Matrices, const arma::vec& lambda, const arma::vec& V0param, const NumericMatrix IGSR, const double gamma, const IntegerVector T_1, const double prior_expected_ip, const IntegerVector N, const NumericVector psi, const double tempering_ratio, const int ncycles, const int samps_per_cycle, const int nchain, const int iter, const int warmup, const int thin, const bool sr_style, const bool quiet);
-RcppExport SEXP _smesir_smesir_mcmc(SEXP YSEXP, SEXP Design_MatricesSEXP, SEXP lambdaSEXP, SEXP V0paramSEXP, SEXP IGSRSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP prior_expected_ipSEXP, SEXP NSEXP, SEXP psiSEXP, SEXP tempering_ratioSEXP, SEXP ncyclesSEXP, SEXP samps_per_cycleSEXP, SEXP nchainSEXP, SEXP iterSEXP, SEXP warmupSEXP, SEXP thinSEXP, SEXP sr_styleSEXP, SEXP quietSEXP) {
+List smesir_mcmc(const NumericMatrix Y, const List Design_Matrices, const arma::vec& lambda, const arma::vec& V0param, const NumericMatrix IGSR, const double gamma, const IntegerVector T_1, const double expected_iip, const IntegerVector N, const NumericVector psi, const int ncycles, const int samps_per_cycle, const int nchain, const int iter, const int warmup, const int thin, const bool sr_style, const bool quiet);
+RcppExport SEXP _smesir_smesir_mcmc(SEXP YSEXP, SEXP Design_MatricesSEXP, SEXP lambdaSEXP, SEXP V0paramSEXP, SEXP IGSRSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP expected_iipSEXP, SEXP NSEXP, SEXP psiSEXP, SEXP ncyclesSEXP, SEXP samps_per_cycleSEXP, SEXP nchainSEXP, SEXP iterSEXP, SEXP warmupSEXP, SEXP thinSEXP, SEXP sr_styleSEXP, SEXP quietSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -46,10 +51,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const NumericMatrix >::type IGSR(IGSRSEXP);
     Rcpp::traits::input_parameter< const double >::type gamma(gammaSEXP);
     Rcpp::traits::input_parameter< const IntegerVector >::type T_1(T_1SEXP);
-    Rcpp::traits::input_parameter< const double >::type prior_expected_ip(prior_expected_ipSEXP);
+    Rcpp::traits::input_parameter< const double >::type expected_iip(expected_iipSEXP);
     Rcpp::traits::input_parameter< const IntegerVector >::type N(NSEXP);
     Rcpp::traits::input_parameter< const NumericVector >::type psi(psiSEXP);
-    Rcpp::traits::input_parameter< const double >::type tempering_ratio(tempering_ratioSEXP);
     Rcpp::traits::input_parameter< const int >::type ncycles(ncyclesSEXP);
     Rcpp::traits::input_parameter< const int >::type samps_per_cycle(samps_per_cycleSEXP);
     Rcpp::traits::input_parameter< const int >::type nchain(nchainSEXP);
@@ -58,7 +62,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const int >::type thin(thinSEXP);
     Rcpp::traits::input_parameter< const bool >::type sr_style(sr_styleSEXP);
     Rcpp::traits::input_parameter< const bool >::type quiet(quietSEXP);
-    rcpp_result_gen = Rcpp::wrap(smesir_mcmc(Y, Design_Matrices, lambda, V0param, IGSR, gamma, T_1, prior_expected_ip, N, psi, tempering_ratio, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet));
+    rcpp_result_gen = Rcpp::wrap(smesir_mcmc(Y, Design_Matrices, lambda, V0param, IGSR, gamma, T_1, expected_iip, N, psi, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -66,7 +70,7 @@ END_RCPP
 static const R_CallMethodDef CallEntries[] = {
     {"_smesir_solve_infections", (DL_FUNC) &_smesir_solve_infections, 5},
     {"_smesir_solve_events", (DL_FUNC) &_smesir_solve_events, 2},
-    {"_smesir_smesir_mcmc", (DL_FUNC) &_smesir_smesir_mcmc, 19},
+    {"_smesir_smesir_mcmc", (DL_FUNC) &_smesir_smesir_mcmc, 18},
     {NULL, NULL, 0}
 };
 

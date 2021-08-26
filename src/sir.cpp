@@ -112,7 +112,11 @@ void update_xi0(arma::mat const & Xi,
 )
 {
   int K = Xi.n_cols;
+  // int P = Xi.n_rows;// temp 
+  // arma::vec mu0(P,arma::fill::zeros); // temp
+  // mu0(0) = 2; // temp
   arma::mat post_var = arma::diagmat(1/(K*(1/V) + (1/V0))); // element-wise inverse
+  // arma::vec post_mean = post_var * ((K/V) % mean(Xi,1) + (1/V0) % mu0); // temp edited // rowMeans(Xi)
   arma::vec post_mean = post_var * (K/V) % mean(Xi,1); // rowMeans(Xi)
   Xi0 = mvrnorm(post_mean, post_var);
 }
