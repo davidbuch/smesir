@@ -8,7 +8,7 @@
 #' @param new_x An list containing covariate data with which to forecast, as needed by
 #' by the model fit in the antecedent "model_fit" call.
 #' @export
-smesir_forecast <- function(Jf, model_fit, new_x = NULL){
+smesir_forecast <- function(Jf, model_fit, new_x = NULL, new_vaccinations = NULL){
   if(Jf < 1 || (Jf %% 1 != 0)) stop("Jf (forecast time horizon) must be an integer greater than 0.")
   
   ## Unpack the model_fit object and preliminary tests
@@ -20,7 +20,7 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
   T_1 <- model_fit$epi_params$outbreak_times
   gamma <- 1/model_fit$epi_params$mean_removal_time
   psi <- model_fit$epi_params$incidence_probabilities
-  
+    
   design_matrices <- model_fit[["design_matrices"]]
   
   ell <- prior[["ell"]]
@@ -31,7 +31,28 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
   Jo <- nrow(design_matrices[[1]])
   nsamps <- nrow(xi_samps)
   
+  # if the user would like to specify, extend this to include "new vaccinations"
+  # otherwise maybe extrapolate trend from last 4 weeks
+  # Also need to switch event forecasts to NB with dispersion samples.
+  if(is.null(new_vaccinations)){
+    vaccinations <- rbind(model_fit$vaccinations,matrix(0, nrow = Jf, ncol = K))
+  }else if(any(dim(new_vaccinations) != c(Jf,K))){
+    stop("Dimensions of 'new_vaccinations' must equal 'c(Jf,K)'")
+  }else{
+    vaccinations <- rbind(model_fit$vaccinations,new_vaccinations)
+  }
+  
   covariate_names <- all.vars(formula[[3]]) # this is really nice because it throws errors for one sided formulas
+  if(length(covariate_names) > 0){
+    for(cname in covariate_names){
+      if(!(cname %in% names(new_x))) stop(paste0("Required covariate '",cname,"' not provided"))
+      if(K == 1){
+        if(length(new_x[[cname]]) != Jf) stop("Rows in 'new_x' must equal 'Jf'.")
+      }else{
+        if(is.null(dim(new_x[[cname]])) || any(dim(new_x[[cname]]) != c(Jf,K))) stop(paste0("Covariate '", cname,"' in new_x has incorrect dimensions"))
+      }
+    }
+  }
   response_name <- all.vars(formula[[2]])
   if(length(response_name) != 1) stop("Error in argument 'formula': Response must be univariate.")
   if(!attr(terms(formula),"intercept")) stop("Error in argument 'formula': smeSIR model must have an intercept.")
@@ -74,6 +95,9 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
   
   design_matrices_forecast <- list()
   if(K == 1){
+    if(is.null(dim(new_x))){
+      stop("When only forecasting for one region, 'new_x' must be a data frame.")
+    }
     covariate_dframe <- list()
     for(cname in covariate_names){
       covariate_dframe[[cname]] <- new_x[,cname]
@@ -124,7 +148,8 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
     event_comp <- function(beta_samp,iip_samp){
       rpois(length(beta_samp), solve_events(solve_infections(beta_samp,
                                                             gamma, T_1,
-                                                            iip_samp, N),psi))
+                                                            iip_samp, N, 
+                                                            vaccinations),psi))
     }
     for(s in 1:nsamps){
       event_samps[,s] <- event_comp(beta_samps[,s],model_fit$samples$IIP[s])
@@ -150,7 +175,8 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL){
       event_comp <- function(beta_samp,iip_samp){
         rpois(length(beta_samp), solve_events(solve_infections(beta_samp,
                                                               gamma, T_1[k],
-                                                              iip_samp, N[k]),psi))
+                                                              iip_samp, N[k],
+                                                              vaccinations[,k]),psi))
       }
       for(s in 1:nsamps){
         event_samps[,s,k] <- event_comp(beta_samps[,s,k],model_fit$samples$IIP[s,k])

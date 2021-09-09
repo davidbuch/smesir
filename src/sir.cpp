@@ -20,6 +20,16 @@ double log_poisd(const NumericVector y, const NumericVector lambda){
   }
   return res;
 }
+double log_negb(const NumericVector y, const NumericVector mu, const double disp){
+  double res = 0;
+  double n = 1/disp;
+  for(int i = 0; i != y.length(); ++i){
+    if(mu[i] != 0 || y[i] != 0){ // if lambda[i] == 0, we have to be careful
+      res += lgamma(y[i] + n) - lgamma(y[i] + 1) - lgamma(n) + y[i]*log(mu[i]/(mu[i] + n)) + n*log(n/(mu[i] + n));
+    }
+  }
+  return res;
+}
 
 arma::vec mvrnorm(arma::vec &mu, arma::mat &Sigma) {
   arma::vec X; X.randn(mu.size());
@@ -32,7 +42,8 @@ NumericVector solve_infections(const NumericVector beta, // time-varying transmi
                                const double gamma, // inverse of average infectious period
                                const int T_1,   // time index of region's outbreak
                                const double IIP, // region's initial infectious population
-                               const int N // region population
+                               const int N, // region population
+                               const NumericVector vaccinations
 ){
   int J = beta.size();
   NumericVector nu(J); // initialize to length J vector of 0s
@@ -41,16 +52,45 @@ NumericVector solve_infections(const NumericVector beta, // time-varying transmi
   int offset = T_1 - 1; // translate index to Cpp: nu_1 is labeled nu_0 here.
   nu(offset) = IIP/N; // proportion of population infected at outbreak
   double state[] = {1 - nu(offset), nu(offset)}; // state at T_1
-  double infections = 0, removals = 0;
+  double infections = 0, removals = 0, unvaccinated = 1;
   for(int j = offset + 1; j != J; ++j){
     infections = max(min(beta(j)*state[0]*state[1],state[0]),0);
-    removals = max(min(gamma*state[1], state[1]),0);
+    removals = max(min(gamma*state[1] + (state[0]/unvaccinated)*vaccinations[j], state[1]),0);
     state[0] = state[0] - infections;
     state[1] = state[1] + infections - removals;
     nu[j] = infections;
+    unvaccinated = max(unvaccinated - vaccinations[j], 0);
   }
   nu[nu == 0] = 1e-16;
   return N*(nu + abs(nu))/2; // get positive part to remove round-off negativity 
+}
+
+//[[Rcpp::export]]
+NumericVector solve_susceptible(const NumericVector beta, // time-varying transmission rate
+                               const double gamma, // inverse of average infectious period
+                               const int T_1,   // time index of region's outbreak
+                               const double IIP, // region's initial infectious population
+                               const int N, // region population
+                               const NumericVector vaccinations
+){
+  int J = beta.size();
+  NumericVector susceptible(J, 1.0); // initialize to length J vector of 0s
+  
+  // first case detection occurs in the interval t_0 -> t_1
+  int offset = T_1 - 1; // translate index to Cpp: nu_1 is labeled nu_0 here.
+  double state[] = {1 - IIP/N, IIP/N}; // state at T_1
+  double infections = 0, removals = 0, unvaccinated = 1;
+  susceptible[offset] = state[0];
+  for(int j = offset + 1; j != J; ++j){
+    infections = max(min(beta(j)*state[0]*state[1],
+                         state[0] - (state[0]/unvaccinated)*vaccinations[j]),0);
+    removals = max(min(gamma*state[1], state[1]),0);
+    state[0] = state[0] - (state[0]/unvaccinated)*vaccinations[j] - infections;
+    state[1] = state[1] + infections - removals;
+    unvaccinated = max(unvaccinated - vaccinations[j],state[0]); // state[0] is a subset of unvaccinated and is nonnegative
+    susceptible[j] = state[0];
+  }
+  return susceptible; // get positive part to remove round-off negativity 
 }
 
 //[[Rcpp::export]]
@@ -80,9 +120,11 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
                      const double gamma, // inverse average infectious period
                      const int T_1, // region's outbreak index
                      const double IIP, // region's initial infectious population
-                     const double expected_iip,
+                     const double expected_iip, // prior mean IIP
+                     const double DISP, // 'prior sample size' (1/nb dispersion)
                      const int N, // region population
-                     const NumericVector psi // interval event probability
+                     const NumericVector psi, // interval event probability
+                     const NumericVector vaccinations
 ){
   arma::vec B = dmat * Xi;
   // check if parameters are within prior support first
@@ -96,11 +138,42 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   arma::mat X(Xi - Xi0);
   res += -0.5 * arma::as_scalar( arma::dot(((X*(X.t())).eval()).diag(), 1/V) );
   
+  // int P = Xi.n_rows;// temp 
+  // arma::vec mu0(P,arma::fill::zeros); // temp
+  // mu0(0) = 2; // temp
+  // arma::vec post_mean = post_var * ((K/V) % mean(Xi,1) + (1/V0) % mu0); // temp edited // rowMeans(Xi)
+  
+  
   // add log prior contribution (IIP)
   res += -IIP/expected_iip;
 
+  
+  
   // add log likelihood contribution
-  res += log_poisd(Y,solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1,IIP,N),psi));
+  NumericVector events = solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1,IIP,N,vaccinations),psi);
+  //res += log_negb(Y,events,DISP);
+  // // subsetting machinery
+  size_t J = Y.length();
+  int discount = 8; // discount first 8 weeks of data
+  NumericVector sel1(discount);
+  NumericVector sel2(J - discount);
+  for(int j = 0; j < J; ++j){
+    if(j < discount){
+      sel1[j] = j;
+    }else{
+      sel2[j - discount] = j;
+    }
+  }
+
+  NumericVector Yhead = Y[sel1];
+  NumericVector Ytail = Y[sel2];
+  NumericVector Ehead = events[sel1];
+  NumericVector Etail = events[sel2];
+
+
+  res += log_negb(Yhead, Ehead, 10); // discounted - prior sample size 1
+  res += log_negb(Ytail, Etail, DISP); // prior sample size 10
+  res += -(DISP*DISP/25); 
 
   return(res);
 }
@@ -184,6 +257,7 @@ void expand_Vparam(arma::vec & V,
 //[[Rcpp::export]]
 List smesir_mcmc(const NumericMatrix Y,
                  const List Design_Matrices,  // List of K design matrices
+                 const NumericMatrix vaccinations, // JxK matrix of vaccination data
                  const arma::vec & lambda, // GP basis eigenvalues
                  const arma::vec & V0param, // pre-expanded variance hyperparameters
                  const NumericMatrix IGSR, // (3x2 if hierarchical, 1x2 ow) Gamma Shape and Rate hyperparameters
@@ -250,8 +324,7 @@ List smesir_mcmc(const NumericMatrix Y,
     arma::vec Xik_prop = Xik; // armadillo does a deep copy
     
 
-    // initialize initial impulse
-    arma::vec iip_proposal_sd(K,arma::fill::ones); // we will adapt this based on sample variance later
+    // initialize initial infectious population
     arma::rowvec IIP(K);
     for(int k = 0; k != K; ++k){
       IIP[k] = R::rgamma(1,expected_iip); // randomly initialize IIP ~ exp(1/expected_iip)
@@ -259,9 +332,18 @@ List smesir_mcmc(const NumericMatrix Y,
     double log_IIPk = 0; // initial value doesn't matter
     double log_IIPk_prop = 0; // initial value doesn't matter
     
-    //arma::mat IIP_mat(IIP.as_row());
+    // initialize 'prior sample size' (inverse of nb dispersion parameter)
+    arma::rowvec DISP(K);
+    for(int k = 0; k != K; ++k){
+      DISP[k] = R::rgamma(1,1) + 1;
+    }
+    double log_DISPk = 0; // initial value doesn't matter
+    double log_DISPk_prop = 0; // initial value doesn't matter
+    
+    // Join IIP and then DISP to Xi as new rows
     arma::mat Xi_and_log_IIP = arma::join_cols(Xi,arma::log(IIP));
-    arma::vec Xik_and_log_IIPk_prop(P+1);
+    Xi_and_log_IIP = arma::join_cols(Xi_and_log_IIP,arma::log(DISP));
+    arma::vec Xik_and_log_IIPk_prop(P+2);
     
     
     if(!quiet){
@@ -280,23 +362,24 @@ List smesir_mcmc(const NumericMatrix Y,
     expand_Vparam(V,Vparam,lambda,ncovs,nbases);
     
     // set Xi0 to vec(0) and keep it that way if sr_style = true
-    arma::vec Xi0(P,arma::fill::zeros); 
+    arma::vec Xi0(P,arma::fill::zeros);
+    //Xi0(0) = 3.5;
     if(!sr_style){
       update_xi0(Xi,Xi0,V,V0); // go ahead and initialize Xi0 among the Xi
     }
 
     if(!quiet){
       Rcout << " done!\n";
-      Rcout << "Begin adaptation... \n\tAdaptation cycle:";
+      Rcout << "Begin adaptation... \n\t";
     }
     
     /* Adaptation Phase */
     
     // prep to adapt Xi proposal covariance
-    arma::vec C0diag(P+1,arma::fill::ones);
-    C0diag.subvec(1+ncovs,P - 1) = lambda/10;
+    arma::vec C0diag(P + 2,arma::fill::ones);
+    C0diag.subvec(1 + ncovs, P - 1) = lambda/10;
     arma::mat C0 = arma::diagmat(C0diag);
-    arma::cube R(P+1,P+1,K);
+    arma::cube R(P + 2, P + 2, K);
     for(int k = 0; k != K; ++k){
       R.slice(k) = arma::chol(C0);
    }
@@ -306,39 +389,36 @@ List smesir_mcmc(const NumericMatrix Y,
     IntegerVector xi_samps_since_last_accepted(K,0);
     NumericVector acc_rates(K,0.0);
     int completed_cycle_count = 0;
-    double tempering_factor = (double) completed_cycle_count/ncycles;
     bool adapting = true;
     int it = 0; // within-cycle iteration count
-    arma::cube ap_Xi_and_log_IIP(samps_per_cycle,P + 1,K);
+    arma::cube ap_Xi_and_log_IIP(samps_per_cycle,P + 2,K);
     while(adapting){
       it += 1; // update iteration number
       if((it % 1000) == 0){checkUserInterrupt();}
       for(int k = 0; k != K; ++k){
-        //Rcout << "Region" << k << "\n";
         if(xi_samp_counts[k] < samps_per_cycle){
-          Xik_and_log_IIPk_prop = Xi_and_log_IIP.col(k) + arma::trans(R.slice(k)) * arma::randn(P + 1);
-          Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P];
-          Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k);
-          //Rcout << "Made proposal " << Xik_and_log_IIPk_prop << "\n";
-          //Rcout << "Current value " << Xi_and_log_IIP.col(k) << "\n";
-          double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,N(k),psi) - 
-            log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,N(k),psi);
-          //Rcout << "Accepting with prob: " << log_acc_prob << "\n";
+          //Rcout << "Is this it? Assume yes.\n";
+          Xik_and_log_IIPk_prop = Xi_and_log_IIP.col(k) + arma::trans(R.slice(k)) * arma::randn(P + 2);
+          //Rcout << "Nope.";
+          Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
+          Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k); log_DISPk = Xi_and_log_IIP(P+1,k);
+          double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi,vaccinations(_,k)) - 
+            log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi,vaccinations(_,k));
           if(R::runif(0,1) < std::exp(log_acc_prob)){
             Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
-            ap_Xi_and_log_IIP(xi_samp_counts[k],0,k,arma::size(1,P+1,1)) = Xik_and_log_IIPk_prop;
+            ap_Xi_and_log_IIP(xi_samp_counts[k],0,k,arma::size(1,P+2,1)) = Xik_and_log_IIPk_prop;
             xi_samp_counts[k] += 1;
             xi_samps_since_last_accepted[k] = 0;
             acc_rates[k] = (1 + (it - 1)*acc_rates[k])/it;
           }else{
             if(completed_cycle_count > ncycles){ // stop being greedy
-              ap_Xi_and_log_IIP(xi_samp_counts[k],0,k,arma::size(1,P+1,1)) = Xi_and_log_IIP.col(k);
+              ap_Xi_and_log_IIP(xi_samp_counts[k],0,k,arma::size(1,P+2,1)) = Xi_and_log_IIP.col(k);
               xi_samp_counts[k] += 1;
             }
             xi_samps_since_last_accepted[k] += 1;
             acc_rates[k] = (0 + (it - 1)*acc_rates[k])/it;
           }
-          if(completed_cycle_count < ncycles && xi_samps_since_last_accepted[k] > 100){
+          if(xi_samps_since_last_accepted[k] > 100){ //completed_cycle_count < ncycles && 
             R.slice(k) = R.slice(k)/3.16; // divide proposal covariance by 10
             xi_samps_since_last_accepted[k] = 0;
           }
@@ -346,6 +426,7 @@ List smesir_mcmc(const NumericMatrix Y,
       }
       Xi = Xi_and_log_IIP.rows(0,P - 1);
       IIP = arma::exp(Xi_and_log_IIP.row(P));
+      DISP = arma::exp(Xi_and_log_IIP.row(P+1));
       //Rcout << "Finished XI update \n";
       // global params with gibbs proposals
       if(!sr_style){
@@ -368,19 +449,17 @@ List smesir_mcmc(const NumericMatrix Y,
         for(int k = 0; k!= K; ++k){
           // magic number comes from 2.38^2, see article Haario et al (2001)
           if(completed_cycle_count < ncycles){
-            R.slice(k) = arma::chol(5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 1));
+            R.slice(k) = arma::chol(5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 2));
           }else{ // after ncycle, begin retaining covariance information across cycles
             int extra_cycle_count = completed_cycle_count - (ncycles - 1);
             arma::mat oldSigHat = arma::trans(R.slice(k)) * R.slice(k);
-            arma::mat newSigHat = 5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 1);
-            arma::mat meanSigHat = ((extra_cycle_count*samps_per_cycle - (P + 1))*oldSigHat + 
-              (samps_per_cycle - (P + 1))*newSigHat)/((extra_cycle_count+1)*samps_per_cycle - (P + 1));
+            arma::mat newSigHat = 5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 2);
+            arma::mat meanSigHat = ((extra_cycle_count*samps_per_cycle - (P + 2))*oldSigHat + 
+              (samps_per_cycle - (P + 2))*newSigHat)/((extra_cycle_count+1)*samps_per_cycle - (P + 2));
             R.slice(k) = arma::chol(meanSigHat);
           }
         }
-        // update tempering factor for IIP
-        tempering_factor = std::min((double) completed_cycle_count/ncycles, 1.0);
-        
+
         // print status updates
         if(!quiet){
           Rcout << "Adaptation Cycle: " << completed_cycle_count << "\n";
@@ -404,6 +483,7 @@ List smesir_mcmc(const NumericMatrix Y,
     arma::mat chain_Xi(P*K,nstore);
     arma::mat chain_Xi0(P,nstore);
     arma::mat chain_IIP(K,nstore);
+    arma::mat chain_DISP(K,nstore);
     arma::mat chain_V(3,nstore);
 
     Rcout << "Begin Sampling... \n\tPercent complete:";
@@ -420,17 +500,18 @@ List smesir_mcmc(const NumericMatrix Y,
       }
       // update local params
       for(int k = 0; k != K; ++k){
-        Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k);
-        Xik_and_log_IIPk_prop = Xi_and_log_IIP.col(k) + arma::trans(R.slice(k)) * arma::randn(P + 1);
-        Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P];
-        double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop), expected_iip,N(k),psi) - 
-          log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk), expected_iip,N(k),psi);
+        Xik_and_log_IIPk_prop = Xi_and_log_IIP.col(k) + arma::trans(R.slice(k)) * arma::randn(P + 2);
+        Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
+        Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k); log_DISPk = Xi_and_log_IIP(P+1,k);
+        double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi,vaccinations(_,k)) - 
+          log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi,vaccinations(_,k));
         if(R::runif(0,1) < std::exp(log_acc_prob)){
           Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
         }
       }
       Xi = Xi_and_log_IIP.rows(0,P - 1);
       IIP = arma::exp(Xi_and_log_IIP.row(P));
+      DISP = arma::exp(Xi_and_log_IIP.row(P+1));
       
       // global params with gibbs proposals
       if(!sr_style){
@@ -445,6 +526,7 @@ List smesir_mcmc(const NumericMatrix Y,
         chain_Xi.col(s) = Xi.as_col();
         chain_Xi0.col(s) = Xi0;
         chain_IIP.col(s) = IIP.as_col();
+        chain_DISP.col(s) = DISP.as_col();
         chain_V.col(s) = Vparam;
       }
     }
@@ -453,6 +535,7 @@ List smesir_mcmc(const NumericMatrix Y,
     chain_output["Xi"] = chain_Xi;
     chain_output["Xi0"] = chain_Xi0;
     chain_output["IIP"] = chain_IIP;
+    chain_output["DISP"] = chain_DISP;
     chain_output["V"] = chain_V;
     MCMC_output[chn] = chain_output;
   }

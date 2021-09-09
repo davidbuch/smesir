@@ -12,8 +12,8 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // solve_infections
-NumericVector solve_infections(const NumericVector beta, const double gamma, const int T_1, const double IIP, const int N);
-RcppExport SEXP _smesir_solve_infections(SEXP betaSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP IIPSEXP, SEXP NSEXP) {
+NumericVector solve_infections(const NumericVector beta, const double gamma, const int T_1, const double IIP, const int N, const NumericVector vaccinations);
+RcppExport SEXP _smesir_solve_infections(SEXP betaSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP IIPSEXP, SEXP NSEXP, SEXP vaccinationsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -22,7 +22,24 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const int >::type T_1(T_1SEXP);
     Rcpp::traits::input_parameter< const double >::type IIP(IIPSEXP);
     Rcpp::traits::input_parameter< const int >::type N(NSEXP);
-    rcpp_result_gen = Rcpp::wrap(solve_infections(beta, gamma, T_1, IIP, N));
+    Rcpp::traits::input_parameter< const NumericVector >::type vaccinations(vaccinationsSEXP);
+    rcpp_result_gen = Rcpp::wrap(solve_infections(beta, gamma, T_1, IIP, N, vaccinations));
+    return rcpp_result_gen;
+END_RCPP
+}
+// solve_susceptible
+NumericVector solve_susceptible(const NumericVector beta, const double gamma, const int T_1, const double IIP, const int N, const NumericVector vaccinations);
+RcppExport SEXP _smesir_solve_susceptible(SEXP betaSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP IIPSEXP, SEXP NSEXP, SEXP vaccinationsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const NumericVector >::type beta(betaSEXP);
+    Rcpp::traits::input_parameter< const double >::type gamma(gammaSEXP);
+    Rcpp::traits::input_parameter< const int >::type T_1(T_1SEXP);
+    Rcpp::traits::input_parameter< const double >::type IIP(IIPSEXP);
+    Rcpp::traits::input_parameter< const int >::type N(NSEXP);
+    Rcpp::traits::input_parameter< const NumericVector >::type vaccinations(vaccinationsSEXP);
+    rcpp_result_gen = Rcpp::wrap(solve_susceptible(beta, gamma, T_1, IIP, N, vaccinations));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -39,13 +56,14 @@ BEGIN_RCPP
 END_RCPP
 }
 // smesir_mcmc
-List smesir_mcmc(const NumericMatrix Y, const List Design_Matrices, const arma::vec& lambda, const arma::vec& V0param, const NumericMatrix IGSR, const double gamma, const IntegerVector T_1, const double expected_iip, const IntegerVector N, const NumericVector psi, const int ncycles, const int samps_per_cycle, const int nchain, const int iter, const int warmup, const int thin, const bool sr_style, const bool quiet);
-RcppExport SEXP _smesir_smesir_mcmc(SEXP YSEXP, SEXP Design_MatricesSEXP, SEXP lambdaSEXP, SEXP V0paramSEXP, SEXP IGSRSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP expected_iipSEXP, SEXP NSEXP, SEXP psiSEXP, SEXP ncyclesSEXP, SEXP samps_per_cycleSEXP, SEXP nchainSEXP, SEXP iterSEXP, SEXP warmupSEXP, SEXP thinSEXP, SEXP sr_styleSEXP, SEXP quietSEXP) {
+List smesir_mcmc(const NumericMatrix Y, const List Design_Matrices, const NumericMatrix vaccinations, const arma::vec& lambda, const arma::vec& V0param, const NumericMatrix IGSR, const double gamma, const IntegerVector T_1, const double expected_iip, const IntegerVector N, const NumericVector psi, const int ncycles, const int samps_per_cycle, const int nchain, const int iter, const int warmup, const int thin, const bool sr_style, const bool quiet);
+RcppExport SEXP _smesir_smesir_mcmc(SEXP YSEXP, SEXP Design_MatricesSEXP, SEXP vaccinationsSEXP, SEXP lambdaSEXP, SEXP V0paramSEXP, SEXP IGSRSEXP, SEXP gammaSEXP, SEXP T_1SEXP, SEXP expected_iipSEXP, SEXP NSEXP, SEXP psiSEXP, SEXP ncyclesSEXP, SEXP samps_per_cycleSEXP, SEXP nchainSEXP, SEXP iterSEXP, SEXP warmupSEXP, SEXP thinSEXP, SEXP sr_styleSEXP, SEXP quietSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< const NumericMatrix >::type Y(YSEXP);
     Rcpp::traits::input_parameter< const List >::type Design_Matrices(Design_MatricesSEXP);
+    Rcpp::traits::input_parameter< const NumericMatrix >::type vaccinations(vaccinationsSEXP);
     Rcpp::traits::input_parameter< const arma::vec& >::type lambda(lambdaSEXP);
     Rcpp::traits::input_parameter< const arma::vec& >::type V0param(V0paramSEXP);
     Rcpp::traits::input_parameter< const NumericMatrix >::type IGSR(IGSRSEXP);
@@ -62,15 +80,16 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const int >::type thin(thinSEXP);
     Rcpp::traits::input_parameter< const bool >::type sr_style(sr_styleSEXP);
     Rcpp::traits::input_parameter< const bool >::type quiet(quietSEXP);
-    rcpp_result_gen = Rcpp::wrap(smesir_mcmc(Y, Design_Matrices, lambda, V0param, IGSR, gamma, T_1, expected_iip, N, psi, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet));
+    rcpp_result_gen = Rcpp::wrap(smesir_mcmc(Y, Design_Matrices, vaccinations, lambda, V0param, IGSR, gamma, T_1, expected_iip, N, psi, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet));
     return rcpp_result_gen;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_smesir_solve_infections", (DL_FUNC) &_smesir_solve_infections, 5},
+    {"_smesir_solve_infections", (DL_FUNC) &_smesir_solve_infections, 6},
+    {"_smesir_solve_susceptible", (DL_FUNC) &_smesir_solve_susceptible, 6},
     {"_smesir_solve_events", (DL_FUNC) &_smesir_solve_events, 2},
-    {"_smesir_smesir_mcmc", (DL_FUNC) &_smesir_smesir_mcmc, 18},
+    {"_smesir_smesir_mcmc", (DL_FUNC) &_smesir_smesir_mcmc, 19},
     {NULL, NULL, 0}
 };
 

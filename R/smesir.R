@@ -26,7 +26,7 @@
 #' \code{expected_initial_infected_population} - the expected size of the infected population that appears at the beginning of the outbreak, used in an exponential prior; 
 #' @param region_names Vector of names of the regions studied, listed in the same order in which they are indexed in the data
 #' @export
-smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
+smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names = NULL, prior = NULL,
                    chains = 4, iter = 50000, warmup = 0, thin = max(floor((iter - warmup)/1000),1), 
                    min_adaptation_cycles = 5, min_samps_per_cycle = NULL, 
                    tempering_ratio = 0.2, quiet = TRUE, sr_style = NULL, 
@@ -118,22 +118,32 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   IGSR <- prior[["IGSR"]]
   expected_initial_infected_population <- prior[["expected_initial_infected_population"]]
   
+  if(is.null(vaccinations)){
+    vaccinations <- matrix(0, nrow = J, ncol = K)
+  }
+  if(any(dim(vaccinations) != c(J,K)) || any(vaccinations > 1) || any(vaccinations < 0)){
+    stop("'vaccinations' must be a JxK matrix of new vaccinations in each interval (as a percentage of each region's population).")
+  }
+  
   ## We will need the eigendecomposition of the scaled GP covariance matrix
   ## when we construct our design matrix
+  
+  # set 'r' here so it is the same for all regions
   S_ell <- exp(-as.matrix(dist(1:J, diag = TRUE, upper = TRUE)/ell)^2)
-  S_ell <- scale(S_ell, center = TRUE, scale = FALSE) # Project out the intercept
   kernel_decomp <- eigen(S_ell,symmetric = TRUE)
   r <- match(TRUE, cumsum(kernel_decomp$values)/sum(kernel_decomp$values) > .99)
-  ebasis <- kernel_decomp$vectors[,1:r]
-  colnames(ebasis) <- paste("GP Basis Func.",1:r)
-  vscales_theta <- kernel_decomp$values[1:r]
+  
   ## Construct Data Matrices for Model from user provided data list
   design_matrices <- list()
   response_matrix <- matrix(nrow = J, ncol = K)
   if(K == 1){
     covariate_dframe <- list()
     for(cname in covariate_names){
-      covariate_dframe[[cname]] <- data[,cname]
+      if(cname %in% colnames(data)){
+        covariate_dframe[[cname]] <- data[,cname]
+      }else{
+        stop(paste0("Covariate '",cname,"' not found in data."))
+      }
     }
     covariate_dframe <- as.data.frame(covariate_dframe)
     design_mat <- model.matrix(as.formula(paste("~", as.character(formula)[3])), covariate_dframe)
@@ -141,14 +151,27 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
       design_mat <- matrix(1, nrow = J, ncol = 1)
       colnames(design_mat) <- "(Intercept)"
     }
+    X <- design_mat
+    ImPx <- diag(nrow(X)) - X%*%solve(t(X)%*%X)%*%t(X)
+    S_ell <- exp(-as.matrix(dist(1:J, diag = TRUE, upper = TRUE)/ell)^2)
+    #S_ell <- scale(S_ell, center = TRUE, scale = FALSE) # Project out the intercept
+    S_ell <- ImPx%*%S_ell%*%t(ImPx)
+    kernel_decomp <- eigen(S_ell,symmetric = TRUE)
+    ebasis <- kernel_decomp$vectors[,1:r]
+    colnames(ebasis) <- paste("GP Basis Func.",1:r)
+    vscales_theta <- kernel_decomp$values[1:r]
+    
     design_matrices[[1]] <- cbind(design_mat,ebasis)
-    #design_matrices[[1]] <- design_mat
     response_matrix[,1] <- data[,response_name]
   }else{
     for(k in 1:K){
       covariate_dframe <- list()
       for(cname in covariate_names){
-        covariate_dframe[[cname]] <- data[[cname]][,k]
+        if(cname %in% names(data)){
+          covariate_dframe[[cname]] <- data[[cname]][,k]
+        }else{
+          stop(paste0("Covariate '",cname,"' column '",k,"' not found in data."))
+        }
       }
       covariate_dframe <- as.data.frame(covariate_dframe)
       design_mat <- model.matrix(as.formula(paste( "~", as.character(formula)[3])), covariate_dframe)
@@ -156,7 +179,16 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
         design_mat <- matrix(1, nrow = J, ncol = 1)
         colnames(design_mat) <- "(Intercept)"
       }
-
+      X <- design_mat
+      ImPx <- diag(nrow(X)) - X%*%solve(t(X)%*%X)%*%t(X)
+      S_ell <- exp(-as.matrix(dist(1:J, diag = TRUE, upper = TRUE)/ell)^2)
+      #S_ell <- scale(S_ell, center = TRUE, scale = FALSE) # Project out the intercept
+      S_ell <- ImPx%*%S_ell%*%t(ImPx)
+      kernel_decomp <- eigen(S_ell,symmetric = TRUE)
+      ebasis <- kernel_decomp$vectors[,1:r]
+      colnames(ebasis) <- paste("GP Basis Func.",1:r)
+      vscales_theta <- kernel_decomp$values[1:r]
+      
       
       design_matrices[[k]] <- cbind(design_mat,ebasis) ## attach eigenbasis
       #design_matrices[[k]] <- design_mat
@@ -190,8 +222,8 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   if(is.null(min_samps_per_cycle)){
     min_samps_per_cycle <- 10*P*P # this should be pretty large since samples are autocorrelated
   }
-
-  MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population,
+  
+  MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vaccinations, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population,
                              region_populations, incidence_probabilities, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
   
   ## do convergence diagnostics here
@@ -199,7 +231,7 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   mcmc_diagnostics <- list()
   for(k in 1:K){
     # get them for Xi
-    mcmc_diagnostics[[k]] <- matrix(nrow = P + 1, ncol = 2)
+    mcmc_diagnostics[[k]] <- matrix(nrow = P + 2, ncol = 2)
     for(p in 1:P){
       samples_matrix <- matrix(nrow = nstore, ncol = chains)
       for(chn in 1:chains){
@@ -214,8 +246,15 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
       samples_matrix[,chn] <- MCMC_Output[[chn]][["IIP"]][k,]
     }
     mcmc_diagnostics[[k]][P + 1,] <- convergence_diagnostics(samples_matrix)
+    # get them for DISP
+    samples_matrix <- matrix(nrow = nstore, ncol = chains)
+    for(chn in 1:chains){
+      samples_matrix[,chn] <- MCMC_Output[[chn]][["DISP"]][k,]
+    }
+    mcmc_diagnostics[[k]][P + 2,] <- convergence_diagnostics(samples_matrix)
     
-    rownames(mcmc_diagnostics[[k]]) <- c(predictor_names,"IIP")
+    
+    rownames(mcmc_diagnostics[[k]]) <- c(predictor_names,"IIP","DISP")
     colnames(mcmc_diagnostics[[k]]) <- c("Rhat", "ESS")
   }
   if(!sr_style){
@@ -300,6 +339,16 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   }
   colnames(IIP) <- rep("IIP",K)
   
+  for(chn in 1:chains){
+    DISP <- matrix(nrow = chains*nstore, ncol = K)
+    for(chn in 1:chains){
+      start_idx_destination <- nstore*(chn-1) + 1
+      end_idx_destination <- nstore*(chn)
+      DISP[start_idx_destination:end_idx_destination,] <- t(MCMC_Output[[chn]][["DISP"]])
+    }
+  }
+  colnames(DISP) <- rep("DISP",K)
+  
   # extract Vparams
   if(!sr_style){
     for(chn in 1:chains){
@@ -328,10 +377,12 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
     samples[["Xi"]] <- Xi
     samples[["Xi0"]] <- Xi0
     samples[["IIP"]] <- IIP
+    samples[["DISP"]] <- DISP
     samples[["V"]] <- V
   }else{
     samples[["Xi"]] <- Xi
     samples[["IIP"]] <- IIP
+    samples[["DISP"]] <- DISP
     samples[["V"]] <- V
   }
   
@@ -340,13 +391,13 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   summary_stats <- list()
   if(K == 1){
     summary_stats[[1]] <- rbind(t(apply(matrix(samples$Xi[,1:(1+nterms)],ncol = 1+nterms), 2, fournum)),
-                               fournum(samples$IIP))
-    rownames(summary_stats[[1]]) <- c(predictor_names[1:(1+nterms)],"IIP")
+                               fournum(samples$IIP),fournum(samples$DISP))
+    rownames(summary_stats[[1]]) <- c(predictor_names[1:(1+nterms)],"IIP","DISP")
   }else{
     for(k in 1:K){
       summary_stats[[k]] <- rbind(t(apply(matrix(samples$Xi[,1:(1+nterms),k],ncol=1+nterms), 2, fournum)),
-                                 fournum(samples$IIP[,k]))
-      rownames(summary_stats[[k]]) <- c(predictor_names[1:(1+nterms)],"IIP")
+                                 fournum(samples$IIP[,k]),fournum(samples$DISP[,k]))
+      rownames(summary_stats[[k]]) <- c(predictor_names[1:(1+nterms)],"IIP","DISP")
     }
   }
   if(!sr_style){
@@ -376,6 +427,7 @@ smesir <- function(formula, data, epi_params, region_names = NULL, prior = NULL,
   output <- list(summary = summary_stats, 
                  mcmc_diagnostics = mcmc_diagnostics, 
                  samples = samples,
+                 vaccinations = vaccinations,
                  prior = prior,
                  formula = formula,
                  sr_style = sr_style,
