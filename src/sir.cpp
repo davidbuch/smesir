@@ -54,12 +54,20 @@ NumericVector solve_infections(const NumericVector beta, // time-varying transmi
   double state[] = {1 - nu(offset), nu(offset)}; // state at T_1
   double infections = 0, removals = 0, unvaccinated = 1;
   for(int j = offset + 1; j != J; ++j){
+    infections = max(min(beta(j)*state[0]*state[1],
+                         state[0] - (state[0]/unvaccinated)*vaccinations[j]),0);
+    removals = max(min(gamma*state[1], state[1]),0);
+    state[0] = state[0] - (state[0]/unvaccinated)*vaccinations[j] - infections;
+    state[1] = state[1] + infections - removals;
+    unvaccinated = max(unvaccinated - vaccinations[j],state[0]); // state[0] is a subset of unvaccinated and is nonnegative
+    nu[j] = infections;
+    /*
     infections = max(min(beta(j)*state[0]*state[1],state[0]),0);
     removals = max(min(gamma*state[1] + (state[0]/unvaccinated)*vaccinations[j], state[1]),0);
     state[0] = state[0] - infections;
     state[1] = state[1] + infections - removals;
-    nu[j] = infections;
     unvaccinated = max(unvaccinated - vaccinations[j], 0);
+    */
   }
   nu[nu == 0] = 1e-16;
   return N*(nu + abs(nu))/2; // get positive part to remove round-off negativity 
