@@ -35,8 +35,19 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
   region_populations <- epi_params$region_populations
   outbreak_times <- epi_params$outbreak_times
   mean_removal_time <- epi_params$mean_removal_time
+  if(length(dim(epi_params$incidence_probabilities)) != 2){
+    K <- length(region_populations)
+    epi_params$incidence_probabilities <- matrix(rep(epi_params$incidence_probabilities, K),ncol = K)
+  }
   incidence_probabilities <- epi_params$incidence_probabilities
   
+  #print(incidence_probabilities)
+  
+  if(!(is.null(vaccinations) || is.matrix(vaccinations))){
+    stop("Vaccination data must be provided as a matrix 
+         (rows = number of time points, cols = number of regions).")
+  }
+  #stop()
   ## Sanity check all arguments
   
   # 0. check the existence and type of each variable
@@ -434,6 +445,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
                  response_matrix = response_matrix,
                  design_matrices = design_matrices,
                  epi_params = epi_params,
-                 region_names = region_names)
+                 region_names = region_names,
+                 n_basis = r)
   return(output)
 }

@@ -20,6 +20,22 @@ double log_poisd(const NumericVector y, const NumericVector lambda){
   }
   return res;
 }
+
+//[[Rcpp::export]]
+double log_negb(const NumericVector y, 
+                  const NumericVector mu, 
+                  const double DISP)
+{
+  double sz = 1/DISP;
+  
+  double res = 0;
+  for(int j = 0; j < y.length(); ++j){
+    res += R::dnbinom_mu(y[j],sz,mu[j],1);
+  }
+  return res;
+}
+
+/*
 double log_negb(const NumericVector y, const NumericVector mu, const double disp){
   double res = 0;
   double n = 1/disp;
@@ -30,6 +46,7 @@ double log_negb(const NumericVector y, const NumericVector mu, const double disp
   }
   return res;
 }
+*/
 
 arma::vec mvrnorm(arma::vec &mu, arma::mat &Sigma) {
   arma::vec X; X.randn(mu.size());
@@ -61,13 +78,6 @@ NumericVector solve_infections(const NumericVector beta, // time-varying transmi
     state[1] = state[1] + infections - removals;
     unvaccinated = max(unvaccinated - vaccinations[j],state[0]); // state[0] is a subset of unvaccinated and is nonnegative
     nu[j] = infections;
-    /*
-    infections = max(min(beta(j)*state[0]*state[1],state[0]),0);
-    removals = max(min(gamma*state[1] + (state[0]/unvaccinated)*vaccinations[j], state[1]),0);
-    state[0] = state[0] - infections;
-    state[1] = state[1] + infections - removals;
-    unvaccinated = max(unvaccinated - vaccinations[j], 0);
-    */
   }
   nu[nu == 0] = 1e-16;
   return N*(nu + abs(nu))/2; // get positive part to remove round-off negativity 
@@ -155,6 +165,7 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   // add log prior contribution (IIP)
   res += -IIP/expected_iip;
 
+  res += -DISP; // prior on DISP is exponential(1)
   
   
   // add log likelihood contribution
@@ -273,7 +284,7 @@ List smesir_mcmc(const NumericMatrix Y,
                  const IntegerVector T_1, // outbreak indices
                  const double expected_iip, // expected infectious population
                  const IntegerVector N, // region populations
-                 const NumericVector psi, // interval event probability
+                 const NumericMatrix psi, // MxK interval event probability
                  const int ncycles,
                  const int samps_per_cycle,
                  const int nchain, 
@@ -410,8 +421,8 @@ List smesir_mcmc(const NumericMatrix Y,
           //Rcout << "Nope.";
           Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
           Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k); log_DISPk = Xi_and_log_IIP(P+1,k);
-          double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi,vaccinations(_,k)) - 
-            log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi,vaccinations(_,k));
+          double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi(_,k),vaccinations(_,k)) - 
+            log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k));
           if(R::runif(0,1) < std::exp(log_acc_prob)){
             Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
             ap_Xi_and_log_IIP(xi_samp_counts[k],0,k,arma::size(1,P+2,1)) = Xik_and_log_IIPk_prop;
@@ -457,6 +468,7 @@ List smesir_mcmc(const NumericMatrix Y,
         for(int k = 0; k!= K; ++k){
           // magic number comes from 2.38^2, see article Haario et al (2001)
           if(completed_cycle_count < ncycles){
+            Rcout << k << '\n';
             R.slice(k) = arma::chol(5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 2));
           }else{ // after ncycle, begin retaining covariance information across cycles
             int extra_cycle_count = completed_cycle_count - (ncycles - 1);
@@ -511,8 +523,8 @@ List smesir_mcmc(const NumericMatrix Y,
         Xik_and_log_IIPk_prop = Xi_and_log_IIP.col(k) + arma::trans(R.slice(k)) * arma::randn(P + 2);
         Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
         Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k); log_DISPk = Xi_and_log_IIP(P+1,k);
-        double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi,vaccinations(_,k)) - 
-          log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi,vaccinations(_,k));
+        double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi(_,k),vaccinations(_,k)) - 
+          log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k));
         if(R::runif(0,1) < std::exp(log_acc_prob)){
           Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
         }

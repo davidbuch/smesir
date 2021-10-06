@@ -1,13 +1,16 @@
 Package: smesir
 Type: Package
-Title: What the package does (short line)
-Version: 1.0
+Title: Modeling regional incidence data to understand transmission rates
+Version: 0.0.1.9000
 Date: 2021-06-27
-Author: Who wrote it
-Maintainer: Who to complain to <yourfault@somewhere.net>
+Authors@R: person("David", "Buch", email = "davidbuch42@gmail.com", 
+    role = c("aut", "cre"), comment = c(ORCID = "0000-0002-4574-0075"))
+Maintainer: David Buch <davidbuch42@gmail.com>
 Description: More about what it does (maybe more than one line)
-License: What license is it under?
-Imports: Rcpp (>= 1.0.6)
+License: GPL-3
+Imports: 
+  Rcpp (>= 1.0.6),
+  MASS (>= 7.3.0)
 LinkingTo: Rcpp, RcppArmadillo
 RoxygenNote: 7.1.0
 Depends: 
