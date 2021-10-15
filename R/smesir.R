@@ -146,6 +146,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
   
   ## Construct Data Matrices for Model from user provided data list
   design_matrices <- list()
+  tilde_off <- list() # matrices to adjust restricted regression parameter estimates
   response_matrix <- matrix(nrow = J, ncol = K)
   if(K == 1){
     covariate_dframe <- list()
@@ -163,16 +164,18 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
       colnames(design_mat) <- "(Intercept)"
     }
     X <- design_mat
-    ImPx <- diag(nrow(X)) - X%*%solve(t(X)%*%X)%*%t(X)
-    S_ell <- exp(-as.matrix(dist(1:J, diag = TRUE, upper = TRUE)/ell)^2)
-    #S_ell <- scale(S_ell, center = TRUE, scale = FALSE) # Project out the intercept
-    S_ell <- ImPx%*%S_ell%*%t(ImPx)
-    kernel_decomp <- eigen(S_ell,symmetric = TRUE)
-    ebasis <- kernel_decomp$vectors[,1:r]
+    px <- ncol(X)
+    TO <- diag(px+r) # adjustment matrix (tilde_off)
+    TO[1:px,(px+1):(px+r)] <- -solve(t(X)%*%X)%*%t(X)%*%kernel_decomp$vectors[,1:r]
+    ImPx <- diag(nrow(X)) - X%*%solve(t(X)%*%X)%*%t(X) # Px_perp
+
+    # restricted basis
+    ebasis <- ImPx %*% kernel_decomp$vectors[,1:r]
     colnames(ebasis) <- paste("GP Basis Func.",1:r)
     vscales_theta <- kernel_decomp$values[1:r]
     
-    design_matrices[[1]] <- cbind(design_mat,ebasis)
+    tilde_off[[1]] <- TO
+    design_matrices[[1]] <- cbind(X,ebasis)
     response_matrix[,1] <- data[,response_name]
   }else{
     for(k in 1:K){
@@ -191,18 +194,18 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
         colnames(design_mat) <- "(Intercept)"
       }
       X <- design_mat
-      ImPx <- diag(nrow(X)) - X%*%solve(t(X)%*%X)%*%t(X)
-      S_ell <- exp(-as.matrix(dist(1:J, diag = TRUE, upper = TRUE)/ell)^2)
-      #S_ell <- scale(S_ell, center = TRUE, scale = FALSE) # Project out the intercept
-      S_ell <- ImPx%*%S_ell%*%t(ImPx)
-      kernel_decomp <- eigen(S_ell,symmetric = TRUE)
-      ebasis <- kernel_decomp$vectors[,1:r]
+      px <- ncol(X)
+      TO <- diag(px+r) # adjustment matrix (tilde_off)
+      TO[1:px,(px+1):(px+r)] <- -solve(t(X)%*%X)%*%t(X)%*%kernel_decomp$vectors[,1:r] 
+      ImPx <- diag(nrow(X)) - X%*%solve(t(X)%*%X)%*%t(X) # Px_perp
+
+      # restricted basis
+      ebasis <- ImPx %*% kernel_decomp$vectors[,1:r]
       colnames(ebasis) <- paste("GP Basis Func.",1:r)
       vscales_theta <- kernel_decomp$values[1:r]
       
-      
-      design_matrices[[k]] <- cbind(design_mat,ebasis) ## attach eigenbasis
-      #design_matrices[[k]] <- design_mat
+      tilde_off[[k]] <-  TO
+      design_matrices[[k]] <- cbind(X,ebasis) ## attach eigenbasis
       response_matrix[,k] <- data[[response_name]][,k]
     }
   }
@@ -234,7 +237,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
     min_samps_per_cycle <- 10*P*P # this should be pretty large since samples are autocorrelated
   }
   
-  MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, vaccinations, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population,
+  MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, tilde_off, vaccinations, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population,
                              region_populations, incidence_probabilities, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
   
   ## do convergence diagnostics here
@@ -263,7 +266,6 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
       samples_matrix[,chn] <- MCMC_Output[[chn]][["DISP"]][k,]
     }
     mcmc_diagnostics[[k]][P + 2,] <- convergence_diagnostics(samples_matrix)
-    
     
     rownames(mcmc_diagnostics[[k]]) <- c(predictor_names,"IIP","DISP")
     colnames(mcmc_diagnostics[[k]]) <- c("Rhat", "ESS")
@@ -311,7 +313,6 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
       end_idx_destination <- nstore*(chn)
       Xi[start_idx_destination:end_idx_destination,] <- t(MCMC_Output[[chn]][["Xi"]])
     }
-    colnames(Xi) <- predictor_names
   }else{
     Xi <- array(dim = c(chains*nstore,P,K))
     for(k in 1:K){
@@ -323,8 +324,22 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
         Xi[start_idx_destination:end_idx_destination,,k] <- t(MCMC_Output[[chn]][["Xi"]][start_idx_source:end_idx_source,])
       }
     }
-    dimnames(Xi)[[2]] <- predictor_names
     dimnames(Xi)[[3]] <- region_names
+  }
+  
+  # Convert coefficient estimates and random effect basis back to original form
+  # Transform back to unrestricted parameters and correct the basis
+  # we will need the unaltered basis functions
+  if(K == 1){
+    Xi <- t(tilde_off[[1]] %*% t(Xi))
+    design_matrices[[1]][,(P - r + 1):P] <- kernel_decomp$vectors[,1:r]
+    colnames(Xi) <- predictor_names
+  }else{
+    for(k in 1:K){
+      Xi[,,k] <- t(tilde_off[[k]] %*%t(Xi[,,k]))
+      design_matrices[[k]][,(P - r + 1):P] <- kernel_decomp$vectors[,1:r]
+    }
+    dimnames(Xi)[[2]] <- predictor_names
   }
 
   # extract Xi0 (only if not single region style fit)

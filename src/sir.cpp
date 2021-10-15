@@ -21,7 +21,6 @@ double log_poisd(const NumericVector y, const NumericVector lambda){
   return res;
 }
 
-//[[Rcpp::export]]
 double log_negb(const NumericVector y, 
                   const NumericVector mu, 
                   const double DISP)
@@ -34,19 +33,6 @@ double log_negb(const NumericVector y,
   }
   return res;
 }
-
-/*
-double log_negb(const NumericVector y, const NumericVector mu, const double disp){
-  double res = 0;
-  double n = 1/disp;
-  for(int i = 0; i != y.length(); ++i){
-    if(mu[i] != 0 || y[i] != 0){ // if lambda[i] == 0, we have to be careful
-      res += lgamma(y[i] + n) - lgamma(y[i] + 1) - lgamma(n) + y[i]*log(mu[i]/(mu[i] + n)) + n*log(n/(mu[i] + n));
-    }
-  }
-  return res;
-}
-*/
 
 arma::vec mvrnorm(arma::vec &mu, arma::mat &Sigma) {
   arma::vec X; X.randn(mu.size());
@@ -121,8 +107,14 @@ NumericVector solve_events(const NumericVector nu, // interval new infections
   NumericVector delta(J);
   for(int j = 0; j != J; ++j){
     u = ((j + 1) + M - abs(j + 1 - M))/2; // == min(j+1,M)
-    for(int m = 0; m != u; ++m){
-      delta[j] += nu[j - m] * psi[m];
+    if(j < 70){
+      for(int m = 0; m != u; ++m){
+        delta[j] += nu[j - m] * psi[m];
+      }
+    }else{
+      for(int m = 0; m != u; ++m){
+        delta[j] += nu[j - m] * psi[m]/(3.6);
+      }
     }
   }
   return delta;
@@ -131,6 +123,7 @@ NumericVector solve_events(const NumericVector nu, // interval new infections
 
 // single region's contribution to the log posterior density
 double log_posterior_single(const arma::vec & Xi, // P vector of region's parameters
+                     const arma::vec & Xi_adjusted, // P vector adjusted to unrestricted values
                      const arma::vec & Xi0,     // P vector of global parameters
                      const arma::vec & V,       // variance parameters
                      const NumericVector Y, // region's event time series
@@ -152,8 +145,8 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   }
   
   double res = 0;
-  // add log prior contribution (Xi)
-  arma::mat X(Xi - Xi0);
+  // add log prior contribution (Xi_adjusted)
+  arma::mat X(Xi_adjusted - Xi0);
   res += -0.5 * arma::as_scalar( arma::dot(((X*(X.t())).eval()).diag(), 1/V) );
   
   // int P = Xi.n_rows;// temp 
@@ -197,23 +190,23 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   return(res);
 }
 
-void update_xi0(arma::mat const & Xi,
+void update_xi0(arma::mat const & Xi_adjusted,
                 arma::vec & Xi0,
                 arma::vec const & V,
                 arma::vec const & V0
 )
 {
-  int K = Xi.n_cols;
+  int K = Xi_adjusted.n_cols;
   // int P = Xi.n_rows;// temp 
   // arma::vec mu0(P,arma::fill::zeros); // temp
   // mu0(0) = 2; // temp
   arma::mat post_var = arma::diagmat(1/(K*(1/V) + (1/V0))); // element-wise inverse
   // arma::vec post_mean = post_var * ((K/V) % mean(Xi,1) + (1/V0) % mu0); // temp edited // rowMeans(Xi)
-  arma::vec post_mean = post_var * (K/V) % mean(Xi,1); // rowMeans(Xi)
+  arma::vec post_mean = post_var * (K/V) % mean(Xi_adjusted,1); // rowMeans(Xi)
   Xi0 = mvrnorm(post_mean, post_var);
 }
 
-void update_Vparam(arma::mat const & Xi,
+void update_Vparam(arma::mat const & Xi_adjusted,
                    arma::vec const & Xi0,
                    arma::vec & Vparam,
                    NumericMatrix IGSR, // Inverse-Gamma Shape and Rate hyperparams
@@ -223,7 +216,7 @@ void update_Vparam(arma::mat const & Xi,
                    bool const vparam_key[]
 )
 {
-  arma::mat X(Xi.each_col() - Xi0);
+  arma::mat X(Xi_adjusted.each_col() - Xi0);
   int K = X.n_cols;
   int P = X.n_rows; // 1 + ncovs + nbases
   arma::vec ss_diag(P);
@@ -276,6 +269,7 @@ void expand_Vparam(arma::vec & V,
 //[[Rcpp::export]]
 List smesir_mcmc(const NumericMatrix Y,
                  const List Design_Matrices,  // List of K design matrices
+                 const List TildeOff, // List of K matrices (removes tilde from coefficient set k)
                  const NumericMatrix vaccinations, // JxK matrix of vaccination data
                  const arma::vec & lambda, // GP basis eigenvalues
                  const arma::vec & V0param, // pre-expanded variance hyperparameters
@@ -324,6 +318,7 @@ List smesir_mcmc(const NumericMatrix Y,
     }
     // randomly initialize parameters
     arma::mat Xi(P,K);
+    arma::mat Xi_adjusted(P,K);
     arma::vec Xik;
     for(int k = 0; k != K; ++k){
       arma::mat dmat = Design_Matrices[k];
@@ -336,12 +331,14 @@ List smesir_mcmc(const NumericMatrix Y,
         if(counter == 0){checkUserInterrupt();}
       }
       Xi.col(k) = Xik;
+      arma::mat tildeoff_k = TildeOff[k];
+      Xi_adjusted.col(k) = tildeoff_k * Xik;
       if(!quiet){
         Rcout << " " << k + 1;
       }
     }
     arma::vec Xik_prop = Xik; // armadillo does a deep copy
-    
+    arma::vec Xik_prop_adjusted = Xik; // these values are just placeholders
 
     // initialize initial infectious population
     arma::rowvec IIP(K);
@@ -416,13 +413,14 @@ List smesir_mcmc(const NumericMatrix Y,
       if((it % 1000) == 0){checkUserInterrupt();}
       for(int k = 0; k != K; ++k){
         if(xi_samp_counts[k] < samps_per_cycle){
-          //Rcout << "Is this it? Assume yes.\n";
           Xik_and_log_IIPk_prop = Xi_and_log_IIP.col(k) + arma::trans(R.slice(k)) * arma::randn(P + 2);
-          //Rcout << "Nope.";
-          Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
+          Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1);
+          arma::mat tildeoff_k = TildeOff[k];
+          Xik_prop_adjusted = tildeoff_k * Xik_prop;
+          log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
           Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k); log_DISPk = Xi_and_log_IIP(P+1,k);
-          double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi(_,k),vaccinations(_,k)) - 
-            log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k));
+          double log_acc_prob = log_posterior_single(Xik_prop,Xik_prop_adjusted,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi(_,k),vaccinations(_,k)) - 
+            log_posterior_single(Xik,Xi_adjusted.col(k),Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k));
           if(R::runif(0,1) < std::exp(log_acc_prob)){
             Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
             ap_Xi_and_log_IIP(xi_samp_counts[k],0,k,arma::size(1,P+2,1)) = Xik_and_log_IIPk_prop;
@@ -444,16 +442,20 @@ List smesir_mcmc(const NumericMatrix Y,
         }
       }
       Xi = Xi_and_log_IIP.rows(0,P - 1);
+      for(int k = 0; k < K; ++k){
+        arma::mat tildeoff_k = TildeOff[k];
+        Xi_adjusted.col(k) = tildeoff_k * Xi.col(k);
+      }
       IIP = arma::exp(Xi_and_log_IIP.row(P));
       DISP = arma::exp(Xi_and_log_IIP.row(P+1));
       //Rcout << "Finished XI update \n";
       // global params with gibbs proposals
       if(!sr_style){
-        update_xi0(Xi,Xi0,V,V0); // modifies Xi0 in place
+        update_xi0(Xi_adjusted,Xi0,V,V0); // modifies Xi0 in place
       }
       //Rcout << "Finished XI0 update \n";
       // update variance parameters
-      update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
+      update_Vparam(Xi_adjusted,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
       //Rcout << "Finished  V update \n";
       // is the adaptation cycle complete?
@@ -521,24 +523,31 @@ List smesir_mcmc(const NumericMatrix Y,
       // update local params
       for(int k = 0; k != K; ++k){
         Xik_and_log_IIPk_prop = Xi_and_log_IIP.col(k) + arma::trans(R.slice(k)) * arma::randn(P + 2);
-        Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1); log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
+        Xik_prop = Xik_and_log_IIPk_prop.subvec(0,P - 1);
+        arma::mat tildeoff_k = TildeOff[k];
+        Xik_prop_adjusted = tildeoff_k * Xik_prop;
+        log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
         Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k); log_DISPk = Xi_and_log_IIP(P+1,k);
-        double log_acc_prob = log_posterior_single(Xik_prop,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi(_,k),vaccinations(_,k)) - 
-          log_posterior_single(Xik,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k));
+        double log_acc_prob = log_posterior_single(Xik_prop,Xik_prop_adjusted,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi(_,k),vaccinations(_,k)) - 
+          log_posterior_single(Xik,Xi_adjusted.col(k),Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k));
         if(R::runif(0,1) < std::exp(log_acc_prob)){
           Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
         }
       }
       Xi = Xi_and_log_IIP.rows(0,P - 1);
+      for(int k = 0; k < K; ++k){
+        arma::mat tildeoff_k = TildeOff[k];
+        Xi_adjusted.col(k) = tildeoff_k * Xi.col(k);
+      }
       IIP = arma::exp(Xi_and_log_IIP.row(P));
       DISP = arma::exp(Xi_and_log_IIP.row(P+1));
       
       // global params with gibbs proposals
       if(!sr_style){
-        update_xi0(Xi,Xi0,V,V0); // modifies Xi0 in place
+        update_xi0(Xi_adjusted,Xi0,V,V0); // modifies Xi0 in place
       }
       
-      update_Vparam(Xi,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
+      update_Vparam(Xi_adjusted,Xi0,Vparam,IGSR,lambda,ncovs,nbases,vparam_key);
       expand_Vparam(V,Vparam,lambda,ncovs,nbases);
       
       if(!(it < warmup) && !(it % thin)){
