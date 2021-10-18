@@ -86,7 +86,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
   if(K == 1){
     if(is.null(prior[["ell"]])) prior[["ell"]] <- J/5
     if(is.null(prior[["V0"]])) prior[["V0"]] <- c(10,10)
-    if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- J/5
+    if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- region_populations/10000
     if(is.null(prior[["IGSR"]])) prior[["IGSR"]] <- c(3,0.2)
     
     if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
@@ -107,7 +107,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
   }else{
     if(is.null(prior[["ell"]])) prior[["ell"]] <- J/5
     if(is.null(prior[["V0"]])) prior[["V0"]] <- c(10,10,0.1)
-    if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- J/5
+    if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- mean(region_populations)/10000
     if(is.null(prior[["IGSR"]])) prior[["IGSR"]] <- matrix(c(rep(c(2.01,0.101),2),3,0.2), nrow = 3, ncol = 2, byrow = TRUE)
     
     if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
@@ -163,10 +163,11 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
       design_mat <- matrix(1, nrow = J, ncol = 1)
       colnames(design_mat) <- "(Intercept)"
     }
-    X <- design_mat
-    px <- ncol(X)
-    TO <- diag(px+r) # adjustment matrix (tilde_off)
-    TO[1:px,(px+1):(px+r)] <- -solve(t(X)%*%X)%*%t(X)%*%kernel_decomp$vectors[,1:r]
+    nonblank <- which(apply(design_mat,2,function(a) any(a != 0)))
+    X <- design_mat[,nonblank]
+    pdm <- ncol(design_mat)
+    TO <- diag(pdm+r) # adjustment matrix (tilde_off)
+    TO[nonblank,(pdm+1):(pdm+r)] <- -solve(t(X)%*%X)%*%t(X)%*%kernel_decomp$vectors[,1:r]
     ImPx <- diag(nrow(X)) - X%*%solve(t(X)%*%X)%*%t(X) # Px_perp
 
     # restricted basis
@@ -175,7 +176,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
     vscales_theta <- kernel_decomp$values[1:r]
     
     tilde_off[[1]] <- TO
-    design_matrices[[1]] <- cbind(X,ebasis)
+    design_matrices[[1]] <- cbind(design_mat,ebasis)
     response_matrix[,1] <- data[,response_name]
   }else{
     for(k in 1:K){
@@ -193,19 +194,20 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
         design_mat <- matrix(1, nrow = J, ncol = 1)
         colnames(design_mat) <- "(Intercept)"
       }
-      X <- design_mat
-      px <- ncol(X)
-      TO <- diag(px+r) # adjustment matrix (tilde_off)
-      TO[1:px,(px+1):(px+r)] <- -solve(t(X)%*%X)%*%t(X)%*%kernel_decomp$vectors[,1:r] 
+      nonblank <- which(apply(design_mat,2,function(a) any(a != 0)))
+      X <- design_mat[,nonblank]
+      pdm <- ncol(design_mat)
+      TO <- diag(pdm+r) # adjustment matrix (tilde_off)
+      TO[nonblank,(pdm+1):(pdm+r)] <- -solve(t(X)%*%X)%*%t(X)%*%kernel_decomp$vectors[,1:r] 
       ImPx <- diag(nrow(X)) - X%*%solve(t(X)%*%X)%*%t(X) # Px_perp
 
       # restricted basis
       ebasis <- ImPx %*% kernel_decomp$vectors[,1:r]
       colnames(ebasis) <- paste("GP Basis Func.",1:r)
       vscales_theta <- kernel_decomp$values[1:r]
-      
+
       tilde_off[[k]] <-  TO
-      design_matrices[[k]] <- cbind(X,ebasis) ## attach eigenbasis
+      design_matrices[[k]] <- cbind(design_mat,ebasis) ## attach eigenbasis
       response_matrix[,k] <- data[[response_name]][,k]
     }
   }
@@ -236,6 +238,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
   if(is.null(min_samps_per_cycle)){
     min_samps_per_cycle <- 10*P*P # this should be pretty large since samples are autocorrelated
   }
+  
   
   MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, tilde_off, vaccinations, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population,
                              region_populations, incidence_probabilities, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag

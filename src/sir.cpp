@@ -63,6 +63,7 @@ NumericVector solve_infections(const NumericVector beta, // time-varying transmi
     state[0] = state[0] - (state[0]/unvaccinated)*vaccinations[j] - infections;
     state[1] = state[1] + infections - removals;
     unvaccinated = max(unvaccinated - vaccinations[j],state[0]); // state[0] is a subset of unvaccinated and is nonnegative
+
     nu[j] = infections;
   }
   nu[nu == 0] = 1e-16;
@@ -137,6 +138,7 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
                      const NumericVector psi, // interval event probability
                      const NumericVector vaccinations
 ){
+
   arma::vec B = dmat * Xi;
   // check if parameters are within prior support first
   bool B_out_of_bounds = arma::any(arma::vectorise(B) < 0);
@@ -160,7 +162,6 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
 
   res += -DISP; // prior on DISP is exponential(1)
   
-  
   // add log likelihood contribution
   NumericVector events = solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1,IIP,N,vaccinations),psi);
   //res += log_negb(Y,events,DISP);
@@ -181,7 +182,6 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   NumericVector Ytail = Y[sel2];
   NumericVector Ehead = events[sel1];
   NumericVector Etail = events[sel2];
-
 
   res += log_negb(Yhead, Ehead, 10); // discounted - prior sample size 1
   res += log_negb(Ytail, Etail, DISP); // prior sample size 10
@@ -470,7 +470,7 @@ List smesir_mcmc(const NumericMatrix Y,
         for(int k = 0; k!= K; ++k){
           // magic number comes from 2.38^2, see article Haario et al (2001)
           if(completed_cycle_count < ncycles){
-            Rcout << k << '\n';
+            //Rcout << k << '\n';
             R.slice(k) = arma::chol(5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 2));
           }else{ // after ncycle, begin retaining covariance information across cycles
             int extra_cycle_count = completed_cycle_count - (ncycles - 1);
