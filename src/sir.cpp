@@ -108,15 +108,18 @@ NumericVector solve_events(const NumericVector nu, // interval new infections
   NumericVector delta(J);
   for(int j = 0; j != J; ++j){
     u = ((j + 1) + M - abs(j + 1 - M))/2; // == min(j+1,M)
-    if(j < 70){
-      for(int m = 0; m != u; ++m){
-        delta[j] += nu[j - m] * psi[m];
-      }
-    }else{
-      for(int m = 0; m != u; ++m){
-        delta[j] += nu[j - m] * psi[m]/(3.6);
-      }
+    for(int m = 0; m != u; ++m){
+      delta[j] += nu[j - m] * psi[m];
     }
+    // if(j < 70){
+    //   for(int m = 0; m != u; ++m){
+    //     delta[j] += nu[j - m] * psi[m];
+    //   }
+    // }else{
+    //   for(int m = 0; m != u; ++m){
+    //     delta[j] += nu[j - m] * psi[m]/(3.6);
+    //   }
+    // }
   }
   return delta;
 }
@@ -161,31 +164,32 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   res += -IIP/expected_iip;
 
   res += -DISP; // prior on DISP is exponential(1)
+  //res += -(DISP*DISP/25); 
   
   // add log likelihood contribution
   NumericVector events = solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1,IIP,N,vaccinations),psi);
-  //res += log_negb(Y,events,DISP);
+  res += log_negb(Y,events,DISP);
+  
   // // subsetting machinery
-  size_t J = Y.length();
-  int discount = 8; // discount first 8 weeks of data
-  NumericVector sel1(discount);
-  NumericVector sel2(J - discount);
-  for(int j = 0; j < J; ++j){
-    if(j < discount){
-      sel1[j] = j;
-    }else{
-      sel2[j - discount] = j;
-    }
-  }
-
-  NumericVector Yhead = Y[sel1];
-  NumericVector Ytail = Y[sel2];
-  NumericVector Ehead = events[sel1];
-  NumericVector Etail = events[sel2];
-
-  res += log_negb(Yhead, Ehead, 10); // discounted - prior sample size 1
-  res += log_negb(Ytail, Etail, DISP); // prior sample size 10
-  res += -(DISP*DISP/25); 
+  // size_t J = Y.length();
+  // int discount = 8; // discount first 8 weeks of data
+  // NumericVector sel1(discount);
+  // NumericVector sel2(J - discount);
+  // for(int j = 0; j < J; ++j){
+  //   if(j < discount){
+  //     sel1[j] = j;
+  //   }else{
+  //     sel2[j - discount] = j;
+  //   }
+  // }
+  // 
+  // NumericVector Yhead = Y[sel1];
+  // NumericVector Ytail = Y[sel2];
+  // NumericVector Ehead = events[sel1];
+  // NumericVector Etail = events[sel2];
+  // 
+  // res += log_negb(Yhead, Ehead, 1); //
+  // res += log_negb(Ytail, Etail, DISP);
 
   return(res);
 }
