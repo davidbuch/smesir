@@ -163,8 +163,8 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   // add log prior contribution (IIP)
   res += -IIP/expected_iip;
 
-  res += -DISP; // prior on DISP is exponential(1)
-  //res += -(DISP*DISP/25); 
+  //res += -DISP; // prior on DISP is exponential(1)
+  res += -(DISP*DISP/50); // prior on DISP is Normal+(0,5^2)  
   
   // add log likelihood contribution
   NumericVector events = solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1,IIP,N,vaccinations),psi);
