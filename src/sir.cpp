@@ -168,28 +168,28 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   
   // add log likelihood contribution
   NumericVector events = solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1,IIP,N,vaccinations),psi);
-  res += log_negb(Y,events,DISP);
+  //res += log_negb(Y,events,DISP);
   
-  // // subsetting machinery
-  // size_t J = Y.length();
-  // int discount = 8; // discount first 8 weeks of data
-  // NumericVector sel1(discount);
-  // NumericVector sel2(J - discount);
-  // for(int j = 0; j < J; ++j){
-  //   if(j < discount){
-  //     sel1[j] = j;
-  //   }else{
-  //     sel2[j - discount] = j;
-  //   }
-  // }
-  // 
-  // NumericVector Yhead = Y[sel1];
-  // NumericVector Ytail = Y[sel2];
-  // NumericVector Ehead = events[sel1];
-  // NumericVector Etail = events[sel2];
-  // 
-  // res += log_negb(Yhead, Ehead, 1); //
-  // res += log_negb(Ytail, Etail, DISP);
+  // subsetting machinery
+  size_t J = Y.length();
+  int discount = 8; // discount first 8 weeks of data
+  NumericVector sel1(discount);
+  NumericVector sel2(J - discount);
+  for(int j = 0; j < J; ++j){
+    if(j < discount){
+      sel1[j] = j;
+    }else{
+      sel2[j - discount] = j;
+    }
+  }
+
+  NumericVector Yhead = Y[sel1];
+  NumericVector Ytail = Y[sel2];
+  NumericVector Ehead = events[sel1];
+  NumericVector Etail = events[sel2];
+
+  res += log_negb(Yhead, Ehead, 10); //
+  res += log_negb(Ytail, Etail, DISP);
 
   return(res);
 }
