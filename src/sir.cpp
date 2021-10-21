@@ -424,7 +424,8 @@ List smesir_mcmc(const NumericMatrix Y,
           log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
           Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k); log_DISPk = Xi_and_log_IIP(P+1,k);
           double log_acc_prob = log_posterior_single(Xik_prop,Xik_prop_adjusted,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi(_,k),vaccinations(_,k)) - 
-            log_posterior_single(Xik,Xi_adjusted.col(k),Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k));
+            log_posterior_single(Xik,Xi_adjusted.col(k),Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k)) + 
+            (log_IIPk_prop - log_IIPk) + (log_DISPk_prop - log_DISPk); // add Jacobians due to variable transforms
           if(R::runif(0,1) < std::exp(log_acc_prob)){
             Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
             ap_Xi_and_log_IIP(xi_samp_counts[k],0,k,arma::size(1,P+2,1)) = Xik_and_log_IIPk_prop;
@@ -533,7 +534,8 @@ List smesir_mcmc(const NumericMatrix Y,
         log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
         Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k); log_DISPk = Xi_and_log_IIP(P+1,k);
         double log_acc_prob = log_posterior_single(Xik_prop,Xik_prop_adjusted,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi(_,k),vaccinations(_,k)) - 
-          log_posterior_single(Xik,Xi_adjusted.col(k),Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k));
+          log_posterior_single(Xik,Xi_adjusted.col(k),Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k)) + 
+          (log_IIPk_prop - log_IIPk) + (log_DISPk_prop - log_DISPk); // add Jacobians due to variable transforms;
         if(R::runif(0,1) < std::exp(log_acc_prob)){
           Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
         }

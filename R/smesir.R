@@ -366,7 +366,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
       IIP[start_idx_destination:end_idx_destination,] <- t(MCMC_Output[[chn]][["IIP"]])
     }
   }
-  colnames(IIP) <- rep("IIP",K)
+  colnames(IIP) <- region_names
   
   for(chn in 1:chains){
     DISP <- matrix(nrow = chains*nstore, ncol = K)
@@ -376,7 +376,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
       DISP[start_idx_destination:end_idx_destination,] <- t(MCMC_Output[[chn]][["DISP"]])
     }
   }
-  colnames(DISP) <- rep("DISP",K)
+  colnames(DISP) <- region_names
   
   # extract Vparams
   if(!sr_style){
