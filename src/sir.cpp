@@ -137,9 +137,12 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
                      const double IIP, // region's initial infectious population
                      const double expected_iip, // prior mean IIP
                      const double DISP, // 'prior sample size' (1/nb dispersion)
+                     const double expected_disp, // prior mean DISP
                      const int N, // region population
                      const NumericVector psi, // interval event probability
-                     const NumericVector vaccinations
+                     const NumericVector vaccinations,
+                     const int discount_period_length, // length of the "discount" period at the beginning of the outbreak
+                     const double discount_period_disp
 ){
 
   arma::vec B = dmat * Xi;
@@ -161,36 +164,38 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   
   
   // add log prior contribution (IIP)
+  // prior on IIP is exponential with mean `expected_iip`
   res += -IIP/expected_iip;
 
-  //res += -DISP; // prior on DISP is exponential(1)
-  res += -(DISP*DISP/50); // prior on DISP is Normal+(0,5^2)  
+  // prior on DISP is Normal+ (Normal folded at 0) with mean `expected_disp`
+  res += -(DISP*DISP/(expected_disp*expected_disp*3.1415926536));   
   
   // add log likelihood contribution
   NumericVector events = solve_events(solve_infections(as<NumericVector>(wrap(B)),gamma,T_1,IIP,N,vaccinations),psi);
-  //res += log_negb(Y,events,DISP);
-  
-  // subsetting machinery
-  size_t J = Y.length();
-  int discount = 8; // discount first 8 weeks of data
-  NumericVector sel1(discount);
-  NumericVector sel2(J - discount);
-  for(int j = 0; j < J; ++j){
-    if(j < discount){
-      sel1[j] = j;
-    }else{
-      sel2[j - discount] = j;
+
+  if(discount_period_length == 0){
+    res += log_negb(Y,events,DISP);
+  }else{
+    // subsetting machinery
+    size_t J = Y.length();
+    NumericVector sel1(discount_period_length);
+    NumericVector sel2(J - discount_period_length);
+    for(int j = 0; j < J; ++j){
+      if(j < discount_period_length){
+        sel1[j] = j;
+      }else{
+        sel2[j - discount_period_length] = j;
+      }
     }
+  
+    NumericVector Yhead = Y[sel1];
+    NumericVector Ytail = Y[sel2];
+    NumericVector Ehead = events[sel1];
+    NumericVector Etail = events[sel2];
+  
+    res += log_negb(Yhead, Ehead, discount_period_disp); 
+    res += log_negb(Ytail, Etail, DISP);
   }
-
-  NumericVector Yhead = Y[sel1];
-  NumericVector Ytail = Y[sel2];
-  NumericVector Ehead = events[sel1];
-  NumericVector Etail = events[sel2];
-
-  res += log_negb(Yhead, Ehead, 10); //
-  res += log_negb(Ytail, Etail, DISP);
-
   return(res);
 }
 
@@ -281,8 +286,11 @@ List smesir_mcmc(const NumericMatrix Y,
                  const double gamma, // inverse infectious period
                  const IntegerVector T_1, // outbreak indices
                  const double expected_iip, // expected infectious population
+                 const double expected_disp,
                  const IntegerVector N, // region populations
                  const NumericMatrix psi, // MxK interval event probability
+                 const int discount_period_length,
+                 const double discount_period_disp,
                  const int ncycles,
                  const int samps_per_cycle,
                  const int nchain, 
@@ -423,8 +431,8 @@ List smesir_mcmc(const NumericMatrix Y,
           Xik_prop_adjusted = tildeoff_k * Xik_prop;
           log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
           Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k); log_DISPk = Xi_and_log_IIP(P+1,k);
-          double log_acc_prob = log_posterior_single(Xik_prop,Xik_prop_adjusted,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi(_,k),vaccinations(_,k)) - 
-            log_posterior_single(Xik,Xi_adjusted.col(k),Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k)) + 
+          double log_acc_prob = log_posterior_single(Xik_prop,Xik_prop_adjusted,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),expected_disp,N(k),psi(_,k),vaccinations(_,k),discount_period_length,discount_period_disp) - 
+            log_posterior_single(Xik,Xi_adjusted.col(k),Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),expected_disp,N(k),psi(_,k),vaccinations(_,k), discount_period_length, discount_period_disp) + 
             (log_IIPk_prop - log_IIPk) + (log_DISPk_prop - log_DISPk); // add Jacobians due to variable transforms
           if(R::runif(0,1) < std::exp(log_acc_prob)){
             Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
@@ -533,8 +541,8 @@ List smesir_mcmc(const NumericMatrix Y,
         Xik_prop_adjusted = tildeoff_k * Xik_prop;
         log_IIPk_prop = Xik_and_log_IIPk_prop[P]; log_DISPk_prop = Xik_and_log_IIPk_prop[P + 1];
         Xik = Xi_and_log_IIP(arma::span(0,P - 1),k); log_IIPk = Xi_and_log_IIP(P,k); log_DISPk = Xi_and_log_IIP(P+1,k);
-        double log_acc_prob = log_posterior_single(Xik_prop,Xik_prop_adjusted,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),N(k),psi(_,k),vaccinations(_,k)) - 
-          log_posterior_single(Xik,Xi_adjusted.col(k),Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),N(k),psi(_,k),vaccinations(_,k)) + 
+        double log_acc_prob = log_posterior_single(Xik_prop,Xik_prop_adjusted,Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk_prop),expected_iip,std::exp(log_DISPk_prop),expected_disp,N(k),psi(_,k),vaccinations(_,k),discount_period_length,discount_period_disp) - 
+          log_posterior_single(Xik,Xi_adjusted.col(k),Xi0,V,Y(_,k),Design_Matrices[k],gamma,T_1(k),std::exp(log_IIPk),expected_iip,std::exp(log_DISPk),expected_disp,N(k),psi(_,k),vaccinations(_,k),discount_period_length,discount_period_disp) + 
           (log_IIPk_prop - log_IIPk) + (log_DISPk_prop - log_DISPk); // add Jacobians due to variable transforms;
         if(R::runif(0,1) < std::exp(log_acc_prob)){
           Xi_and_log_IIP.col(k) = Xik_and_log_IIPk_prop;
