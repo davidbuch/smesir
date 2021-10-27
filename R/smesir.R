@@ -87,7 +87,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
     if(is.null(prior[["ell"]])) prior[["ell"]] <- J/5
     if(is.null(prior[["V0"]])) prior[["V0"]] <- c(10,10)
     if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- median(region_populations)/10000
-    if(is.null(prior[["expected_dispersion"]])) <- 5 # a pretty diffuse prior: N+ with sigma = 5*sqrt(pi/2)
+    if(is.null(prior[["expected_dispersion"]])) prior[["expected_dispersion"]] <- 5 # a pretty diffuse prior: N+ with sigma = 5*sqrt(pi/2)
     if(is.null(prior[["IGSR"]])) prior[["IGSR"]] <- c(3,0.2)
     
     if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){

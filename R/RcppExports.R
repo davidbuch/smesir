@@ -13,7 +13,7 @@ solve_events <- function(nu, psi) {
     .Call(`_smesir_solve_events`, nu, psi)
 }
 
-smesir_mcmc <- function(Y, Design_Matrices, TildeOff, vaccinations, lambda, V0param, IGSR, gamma, T_1, expected_iip, N, psi, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet) {
-    .Call(`_smesir_smesir_mcmc`, Y, Design_Matrices, TildeOff, vaccinations, lambda, V0param, IGSR, gamma, T_1, expected_iip, N, psi, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet)
+smesir_mcmc <- function(Y, Design_Matrices, TildeOff, vaccinations, lambda, V0param, IGSR, gamma, T_1, expected_iip, expected_disp, N, psi, discount_period_length, discount_period_disp, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet) {
+    .Call(`_smesir_smesir_mcmc`, Y, Design_Matrices, TildeOff, vaccinations, lambda, V0param, IGSR, gamma, T_1, expected_iip, expected_disp, N, psi, discount_period_length, discount_period_disp, ncycles, samps_per_cycle, nchain, iter, warmup, thin, sr_style, quiet)
 }
 
