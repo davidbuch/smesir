@@ -86,8 +86,8 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
   if(K == 1){
     if(is.null(prior[["ell"]])) prior[["ell"]] <- J/5
     if(is.null(prior[["V0"]])) prior[["V0"]] <- c(10,10)
-    if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- median(region_populations)/10000
-    if(is.null(prior[["expected_dispersion"]])) prior[["expected_dispersion"]] <- 5 # a pretty diffuse prior: N+ with sigma = 5*sqrt(pi/2)
+    if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- region_populations/10000
+    if(is.null(prior[["expected_dispersion"]])) prior[["expected_dispersion"]] <- 5*sqrt(2/3.14159) # a pretty diffuse prior: N+ with sigma = 5
     if(is.null(prior[["IGSR"]])) prior[["IGSR"]] <- c(3,0.2)
     
     if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
@@ -111,7 +111,8 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
   }else{
     if(is.null(prior[["ell"]])) prior[["ell"]] <- J/5
     if(is.null(prior[["V0"]])) prior[["V0"]] <- c(10,10,0.1)
-    if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- mean(region_populations)/10000
+    if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- median(region_populations)/10000
+    if(is.null(prior[["expected_dispersion"]])) prior[["expected_dispersion"]] <- 5*sqrt(2/3.14159) # a pretty diffuse prior: N+ with sigma = 5
     if(is.null(prior[["IGSR"]])) prior[["IGSR"]] <- matrix(c(rep(c(2.01,0.101),2),3,0.2), nrow = 3, ncol = 2, byrow = TRUE)
     
     if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
@@ -122,6 +123,9 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
     }
     if(!is.numeric(prior[["expected_initial_infected_population"]]) || length(prior[["expected_initial_infected_population"]]) != 1 || prior[["expected_initial_infected_population"]] <= 0){
       stop("prior[['expected_initial_infected_population']] must be a positive scalar")
+    }
+    if(!is.numeric(prior[["expected_dispersion"]]) || length(prior[["expected_dispersion"]]) != 1 || prior[["expected_dispersion"]] <= 0){
+      stop("prior[['expected_dispersion']] must be a positive scalar")
     }
     if(!is.numeric(prior[["IGSR"]]) || dim(prior[["IGSR"]]) != c(3,2) || any(prior[["IGSR"]] <= 0)){
       stop("prior[['IGSR']] must be a 3x2 positive numeric matrix")
@@ -255,6 +259,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
     min_samps_per_cycle <- 10*P*P # this should be pretty large since samples are autocorrelated
   }
   
+  print(list(response_matrix, design_matrices, tilde_off, vaccinations, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population, expected_dispersion, region_populations, incidence_probabilities, discount_period_length, discount_period_dispersion, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet))
   
   MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, tilde_off, vaccinations, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population, expected_dispersion, region_populations, incidence_probabilities, discount_period_length, discount_period_dispersion, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
   
