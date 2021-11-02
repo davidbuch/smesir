@@ -259,8 +259,6 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
     min_samps_per_cycle <- 10*P*P # this should be pretty large since samples are autocorrelated
   }
   
-  print(list(response_matrix, design_matrices, tilde_off, vaccinations, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population, expected_dispersion, region_populations, incidence_probabilities, discount_period_length, discount_period_dispersion, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet))
-  
   MCMC_Output <- smesir_mcmc(response_matrix, design_matrices, tilde_off, vaccinations, vscales_theta, V0, IGSR, 1/mean_removal_time, outbreak_times, expected_initial_infected_population, expected_dispersion, region_populations, incidence_probabilities, discount_period_length, discount_period_dispersion, min_adaptation_cycles, min_samps_per_cycle, chains,iter,warmup,thin,sr_style,quiet) # last arg is sr_style flag
   
   ## do convergence diagnostics here
