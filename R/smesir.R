@@ -184,7 +184,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
       colnames(design_mat) <- "(Intercept)"
     }
     nonblank <- which(apply(design_mat,2,function(a) any(a != 0)))
-    X <- design_mat[,nonblank]
+    X <- matrix(design_mat[,nonblank],ncol = length(nonblank))
     pdm <- ncol(design_mat)
     TO <- diag(pdm+r) # adjustment matrix (tilde_off)
     TO[nonblank,(pdm+1):(pdm+r)] <- -solve(t(X)%*%X)%*%t(X)%*%kernel_decomp$vectors[,1:r]
@@ -215,7 +215,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
         colnames(design_mat) <- "(Intercept)"
       }
       nonblank <- which(apply(design_mat,2,function(a) any(a != 0)))
-      X <- design_mat[,nonblank]
+      X <- matrix(design_mat[,nonblank],ncol = length(nonblank))
       pdm <- ncol(design_mat)
       TO <- diag(pdm+r) # adjustment matrix (tilde_off)
       TO[nonblank,(pdm+1):(pdm+r)] <- -solve(t(X)%*%X)%*%t(X)%*%kernel_decomp$vectors[,1:r] 
