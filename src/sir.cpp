@@ -149,7 +149,7 @@ double log_posterior_single(const arma::vec & Xi, // P vector of region's parame
   // check if parameters are within prior support first
   bool B_out_of_bounds = arma::any(arma::vectorise(B) < 0);
   if(B_out_of_bounds || IIP > N){ // B or IIP out of bounds?
-    return(std::log(0)); // likelihood = 0
+    return(std::log(0)); // prior(beta) = 0
   }
   
   double res = 0;

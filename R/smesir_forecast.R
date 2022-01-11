@@ -128,34 +128,38 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, new_vaccinations = NULL
     forecast_beta <- forecast_gp + as.matrix(forecast_covariates[[1]])%*%t(xi_samps[,1:(1+nterms)])
     beta_samps <- rbind(design_matrices[[1]] %*% t(xi_samps),forecast_beta)
     beta_samps <- pmax(beta_samps,0)
-    plot(rowMeans(beta_samps)/gamma, type = "l", ylim = c(0,max(apply(beta_samps/gamma,1,function(x) quantile(x,c(0.025,0.975))))), main = k)
-    plot_confint(t(apply(beta_samps/gamma,1,function(x) quantile(x,c(0.025,0.975)))),density=15,col = "blue")
+#    plot(t(apply(beta_samps/gamma,1,function(x) quantile(x,0.5)), type = "l", ylim = c(0,max(apply(beta_samps/gamma,1,function(x) quantile(x,c(0.025,0.975))))), main = k)
+#    plot_confint(t(apply(beta_samps/gamma,1,function(x) quantile(x,c(0.025,0.975)))),density=15,col = "blue")
     
+    expected_samps <- array(dim = c(Jo + Jf, nsamps))
     event_samps <- array(dim = c(Jo + Jf, nsamps))
     vulnerable_samps <- array(dim = c(Jo + Jf, nsamps))
-    event_CI <- array(dim = c(Jo + Jf, 2))
+    event_CI <- array(dim = c(Jo + Jf, 3))
+    expected_CI <- array(dim = c(Jo + Jf, 3))
+    vulnerable_CI <- array(dim = c(Jo + Jf, 3))
     
-    event_comp <- function(beta_samp,iip_samp,disp_samp){
-      # rnbinom(length(beta_samp),
-      #         size = 1/disp_samp,
-      #         mu = solve_events(solve_infections(beta_samp,
-      #                                                       gamma, T_1,
-      #                                                       iip_samp, N,
-      #                                                       vaccinations),psi))
+    expected_comp <- function(beta_samp,iip_samp,disp_samp){
       solve_events(solve_infections(beta_samp,
                                     gamma, T_1,
                                     iip_samp, N,
                                     vaccinations),psi)
     }
+    event_comp <- function(beta_samp,iip_samp,disp_samp){
+      rnbinom(length(beta_samp),
+              size = 1/disp_samp,
+              mu = solve_events(solve_infections(beta_samp,gamma, T_1, iip_samp, N, vaccinations),psi))
+    }
     vulnerable_comp <- function(beta_samp,iip_samp){
       solve_susceptible(beta_samp, gamma, T_1,iip_samp, N,vaccinations)
     }
     for(s in 1:nsamps){
+      expected_samps[,s] <- expected_comp(beta_samps[,s],model_fit$samples$IIP[s], model_fit$samples$DISP[s])
       event_samps[,s] <- event_comp(beta_samps[,s],model_fit$samples$IIP[s], model_fit$samples$DISP[s])
       vulnerable_samps[,s] <- vulnerable_comp(beta_samps[,s],model_fit$samples$IIP[s])
     }
-    event_CI <- t(apply(event_samps,1,function(x) quantile(x, c(0.025,0.975))))
-    vulnerable_CI <- t(apply(vulnerable_samps,1,function(x) quantile(x, c(0.025,0.975))))
+    expected_CI <- t(apply(expected_samps,1,function(x) quantile(x, c(0.025,0.5,0.975))))
+    event_CI <- t(apply(event_samps,1,function(x) quantile(x, c(0.025,0.5,0.975))))
+    vulnerable_CI <- t(apply(vulnerable_samps,1,function(x) quantile(x, c(0.025,0.5,0.975))))
   }else{
     forecast_beta <- array(dim = c(Jf,nsamps,K))
     beta_samps <- array(dim = c(Jo + Jf, nsamps,K))
@@ -165,35 +169,44 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, new_vaccinations = NULL
       forecast_beta[,,k] <- forecast_gp + as.matrix(forecast_covariates[[k]])%*%t(xi_samps[,1:(1+nterms),k])
       beta_samps[,,k] <- rbind(design_matrices[[k]] %*% t(xi_samps[,,k]),forecast_beta[,,k])
       beta_samps[,,k] <- pmax(beta_samps[,,k],0)
+      
+      #      plot(t(apply(beta_samps[,,k]/gamma,1,function(x) quantile(x,0.5))), type = "l", ylim = c(0,max(apply(beta_samps[,,k]/gamma,1,function(x) quantile(x,c(0.025,0.975))))), main = k)
+      #      plot_confint(t(apply(beta_samps[,,k]/gamma,1,function(x) quantile(x,c(0.025,0.975)))),density=15,col = "blue")
     }
     
+    expected_samps <- array(dim = c(Jo + Jf, nsamps,K))
     event_samps <- array(dim = c(Jo + Jf, nsamps,K))
     vulnerable_samps <- array(dim = c(Jo + Jf, nsamps,K))
-    event_CI <- array(dim = c(Jo + Jf, 2,K))
-    vulnerable_CI <- array(dim = c(Jo + Jf, 2, K))
+    expected_CI <- array(dim = c(Jo + Jf, 3,K))
+    event_CI <- array(dim = c(Jo + Jf, 3,K))
+    vulnerable_CI <- array(dim = c(Jo + Jf, 3, K))
     for(k in 1:K){
-      event_comp <- function(beta_samp,iip_samp,disp_samp){
-        # rnbinom(length(beta_samp),
-        #         size = 1/disp_samp,
-        #         mu = solve_events(solve_infections(beta_samp, gamma, T_1[k],
-        #                                                       iip_samp, N[k],
-        #                                                       vaccinations[,k]),psi[,k]))
+      expected_comp <- function(beta_samp,iip_samp,disp_samp){
         solve_events(solve_infections(beta_samp, gamma, T_1[k],
                                       iip_samp, N[k],
                                       vaccinations[,k]),psi[,k])
+      }
+      event_comp <- function(beta_samp,iip_samp,disp_samp){
+        rnbinom(length(beta_samp),
+                size = 1/disp_samp,
+                mu = solve_events(solve_infections(beta_samp, gamma, T_1[k],iip_samp,N[k],vaccinations[,k]),psi[,k]))
       }
       vulnerable_comp <- function(beta_samp,iip_samp){
         solve_susceptible(beta_samp, gamma, T_1[k],iip_samp, N[k],vaccinations[,k])
       }
       for(s in 1:nsamps){
+        expected_samps[,s,k] <- expected_comp(beta_samps[,s,k],model_fit$samples$IIP[s,k],model_fit$samples$DISP[s,k])
         event_samps[,s,k] <- event_comp(beta_samps[,s,k],model_fit$samples$IIP[s,k],model_fit$samples$DISP[s,k])
         vulnerable_samps[,s,k] <- vulnerable_comp(beta_samps[,s,k],model_fit$samples$IIP[s,k])
       }
-      event_CI[,,k] <- t(apply(event_samps[,,k],1,function(x) quantile(x, c(0.025,0.975))))
-      vulnerable_CI[,,k] <- t(apply(vulnerable_samps[,,k],1,function(x) quantile(x, c(0.025,0.975))))
+      expected_CI[,,k] <- t(apply(expected_samps[,,k],1,function(x) quantile(x, c(0.025,0.5,0.975))))
+      event_CI[,,k] <- t(apply(event_samps[,,k],1,function(x) quantile(x, c(0.025,0.5,0.975))))
+      vulnerable_CI[,,k] <- t(apply(vulnerable_samps[,,k],1,function(x) quantile(x, c(0.025,0.5,0.975))))
     }
   }
-  forecast_dat <- list(event_samples = event_samps, 
+  forecast_dat <- list(expected_samples = expected_samps,
+                       expected_confints = expected_CI,
+                       event_samples = event_samps, 
                        event_confints = event_CI,
                        vulnerable_samples = vulnerable_samps,
                        vulnerable_confints = vulnerable_CI)
