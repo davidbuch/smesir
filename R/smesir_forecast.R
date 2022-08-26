@@ -126,8 +126,8 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, new_vaccinations = NULL
     forecast_expectations <- conditional_mean_transform %*% t(xi_samps[,(P-r+1):P])
     forecast_gp <- forecast_expectations + conditional_cov_transform %*% matrix(rnorm(rf*nsamps), nrow = rf, ncol = nsamps)
     forecast_beta <- forecast_gp + as.matrix(forecast_covariates[[1]])%*%t(xi_samps[,1:(1+nterms)])
-    beta_samps <- rbind(design_matrices[[1]] %*% t(xi_samps),forecast_beta)
-    beta_samps <- pmax(beta_samps,0)
+    beta_samps <- exp(rbind(design_matrices[[1]] %*% t(xi_samps),forecast_beta))
+    #beta_samps <- pmax(beta_samps,0)
 #    plot(t(apply(beta_samps/gamma,1,function(x) quantile(x,0.5)), type = "l", ylim = c(0,max(apply(beta_samps/gamma,1,function(x) quantile(x,c(0.025,0.975))))), main = k)
 #    plot_confint(t(apply(beta_samps/gamma,1,function(x) quantile(x,c(0.025,0.975)))),density=15,col = "blue")
     
@@ -167,8 +167,8 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, new_vaccinations = NULL
       forecast_expectations <- conditional_mean_transform %*% t(xi_samps[,(P-r+1):P,k])
       forecast_gp <- forecast_expectations + conditional_cov_transform %*% matrix(rnorm(rf*nsamps), nrow = rf, ncol = nsamps)
       forecast_beta[,,k] <- forecast_gp + as.matrix(forecast_covariates[[k]])%*%t(xi_samps[,1:(1+nterms),k])
-      beta_samps[,,k] <- rbind(design_matrices[[k]] %*% t(xi_samps[,,k]),forecast_beta[,,k])
-      beta_samps[,,k] <- pmax(beta_samps[,,k],0)
+      beta_samps[,,k] <- exp(rbind(design_matrices[[k]] %*% t(xi_samps[,,k]),forecast_beta[,,k]))
+      #beta_samps[,,k] <- pmax(beta_samps[,,k],0)
       
       #      plot(t(apply(beta_samps[,,k]/gamma,1,function(x) quantile(x,0.5))), type = "l", ylim = c(0,max(apply(beta_samps[,,k]/gamma,1,function(x) quantile(x,c(0.025,0.975))))), main = k)
       #      plot_confint(t(apply(beta_samps[,,k]/gamma,1,function(x) quantile(x,c(0.025,0.975)))),density=15,col = "blue")

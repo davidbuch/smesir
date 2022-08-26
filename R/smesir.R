@@ -29,7 +29,7 @@
 smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names = NULL, prior = NULL,
                    chains = 4, iter = 50000, warmup = 0, thin = max(floor((iter - warmup)/1000),1), 
                    min_adaptation_cycles = 5, min_samps_per_cycle = NULL, 
-                   tempering_ratio = 0.2, quiet = TRUE, sr_style = NULL, 
+                   quiet = TRUE, sr_style = NULL, 
                    seed = NULL){
   ## Unpack epi_params
   region_populations <- epi_params$region_populations
@@ -127,7 +127,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
     if(!is.numeric(prior[["expected_dispersion"]]) || length(prior[["expected_dispersion"]]) != 1 || prior[["expected_dispersion"]] <= 0){
       stop("prior[['expected_dispersion']] must be a positive scalar")
     }
-    if(!is.numeric(prior[["IGSR"]]) || dim(prior[["IGSR"]]) != c(3,2) || any(prior[["IGSR"]] <= 0)){
+    if(!is.numeric(prior[["IGSR"]]) || !all(dim(prior[["IGSR"]]) == c(3,2)) || any(prior[["IGSR"]] <= 0)){
       stop("prior[['IGSR']] must be a 3x2 positive numeric matrix")
     }
   }
