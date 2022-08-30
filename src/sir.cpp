@@ -484,14 +484,29 @@ List smesir_mcmc(const NumericMatrix Y,
           // magic number comes from 2.38^2, see article Haario et al (2001)
           if(completed_cycle_count < ncycles){
             //Rcout << k << '\n';
-            R.slice(k) = arma::chol(5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 2));
+	    arma::mat SigHat = 5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 2);
+	    // Take the robust cholesky decomposition
+	    bool chol_success = false;
+	    while(chol_success == false){
+	      chol_success = arma::chol(R.slice(k), SigHat);
+	      if(chol_success == false){
+		SigHat += C0 * 1e-6;
+	      }
+	    }
           }else{ // after ncycle, begin retaining covariance information across cycles
             int extra_cycle_count = completed_cycle_count - (ncycles - 1);
             arma::mat oldSigHat = arma::trans(R.slice(k)) * R.slice(k);
             arma::mat newSigHat = 5.66*arma::cov(ap_Xi_and_log_IIP.slice(k))/(P + 2);
             arma::mat meanSigHat = ((extra_cycle_count*samps_per_cycle - (P + 2))*oldSigHat + 
               (samps_per_cycle - (P + 2))*newSigHat)/((extra_cycle_count+1)*samps_per_cycle - (P + 2));
-            R.slice(k) = arma::chol(meanSigHat);
+	    // take the robust cholesky decomposition
+	    bool chol_success =	false;
+            while(chol_success == false){
+              chol_success = arma::chol(R.slice(k), meanSigHat);
+	      if(chol_success == false){
+                meanSigHat += C0 * 1e-6;
+              }
+	    }
           }
         }
 
