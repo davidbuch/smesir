@@ -88,7 +88,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
     if(is.null(prior[["V0"]])) prior[["V0"]] <- c(10,10)
     if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- region_populations/10000
     if(is.null(prior[["expected_dispersion"]])) prior[["expected_dispersion"]] <- 5*sqrt(2/3.14159) # a pretty diffuse prior: N+ with sigma = 5
-    if(is.null(prior[["IGSR"]])) prior[["IGSR"]] <- c(3,0.2)
+    if(is.null(prior[["IGSR"]])) prior[["IGSR"]] <- c(2.01,0.101)
     
     if(!is.numeric(prior[["ell"]]) || length(prior[["ell"]]) != 1 || prior[["ell"]] <= 0){
       stop("prior[['ell']] must be a positive scalar")
@@ -110,7 +110,7 @@ smesir <- function(formula, data, epi_params, vaccinations = NULL, region_names 
     prior[["IGSR"]] <- matrix(rep(prior[["IGSR"]],3), nrow = 3, ncol = 2,  byrow = TRUE)
   }else{
     if(is.null(prior[["ell"]])) prior[["ell"]] <- J/5
-    if(is.null(prior[["V0"]])) prior[["V0"]] <- c(10,10,0.1)
+    if(is.null(prior[["V0"]])) prior[["V0"]] <- c(10,10,1e-8) # basically squeeze out any global temporal random effect
     if(is.null(prior[["expected_initial_infected_population"]])) prior[["expected_initial_infected_population"]] <- median(region_populations)/10000
     if(is.null(prior[["expected_dispersion"]])) prior[["expected_dispersion"]] <- 5*sqrt(2/3.14159) # a pretty diffuse prior: N+ with sigma = 5
     if(is.null(prior[["IGSR"]])) prior[["IGSR"]] <- matrix(c(rep(c(2.01,0.101),2),3,0.2), nrow = 3, ncol = 2, byrow = TRUE)
