@@ -8,7 +8,7 @@
 #' @param new_x An list containing covariate data with which to forecast, as needed by
 #' by the model fit in the antecedent "model_fit" call.
 #' @export
-smesir_forecast <- function(Jf, model_fit, new_x = NULL, new_vaccinations = NULL){
+smesir_forecast <- function(Jf, model_fit, new_x = NULL, new_vaccinations = NULL, fixed_dispersion = NULL){
   if(Jf < 1 || (Jf %% 1 != 0)) stop("Jf (forecast time horizon) must be an integer greater than 0.")
   
   ## Unpack the model_fit object and preliminary tests
@@ -139,12 +139,14 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, new_vaccinations = NULL
     vulnerable_CI <- array(dim = c(Jo + Jf, 3))
     
     expected_comp <- function(beta_samp,iip_samp,disp_samp){
+      disp_samp <- ifelse(is.null(fixed_dispersion), disp_samp, fixed_dispersion)
       solve_events(solve_infections(beta_samp,
                                     gamma, T_1,
                                     iip_samp, N,
                                     vaccinations),psi)
     }
     event_comp <- function(beta_samp,iip_samp,disp_samp){
+      disp_samp <- ifelse(is.null(fixed_dispersion), disp_samp, fixed_dispersion)
       rnbinom(length(beta_samp),
               size = 1/disp_samp,
               mu = solve_events(solve_infections(beta_samp,gamma, T_1, iip_samp, N, vaccinations),psi))
@@ -182,11 +184,13 @@ smesir_forecast <- function(Jf, model_fit, new_x = NULL, new_vaccinations = NULL
     vulnerable_CI <- array(dim = c(Jo + Jf, 3, K))
     for(k in 1:K){
       expected_comp <- function(beta_samp,iip_samp,disp_samp){
+        disp_samp <- ifelse(is.null(fixed_dispersion), disp_samp, fixed_dispersion)
         solve_events(solve_infections(beta_samp, gamma, T_1[k],
                                       iip_samp, N[k],
                                       vaccinations[,k]),psi[,k])
       }
       event_comp <- function(beta_samp,iip_samp,disp_samp){
+        disp_samp <- ifelse(is.null(fixed_dispersion), disp_samp, fixed_dispersion)
         rnbinom(length(beta_samp),
                 size = 1/disp_samp,
                 mu = solve_events(solve_infections(beta_samp, gamma, T_1[k],iip_samp,N[k],vaccinations[,k]),psi[,k]))
